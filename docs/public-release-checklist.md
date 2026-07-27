@@ -10,6 +10,7 @@
 - [x] 商业歌曲完整歌词测试夹具已替换为原创短夹具。
 - [x] 文档说明网易云参考项目及其 Apache-2.0 许可。
 - [x] 包元数据禁止误发布到 npm。
+- [x] 启用 Secret Scanning、Push Protection 和 Dependabot 安全更新。
 
 ## 公开前确认
 
@@ -17,9 +18,9 @@
 - [x] 最后一次秘密信息、绝对路径和个人数据扫描无结果。
 - [x] 选择 Apache License 2.0，并添加 LICENSE 与 NOTICE。
 - [x] 删除或确认所有旧 GitHub Actions 日志可公开。
-- [ ] 将仓库可见性从 Private 改为 Public。
-- [ ] 公开后启用 Private Vulnerability Reporting。
-- [ ] 创建首个预发布版本和 Release Notes。
+- [x] 将仓库可见性从 Private 改为 Public。
+- [x] 公开后启用 Private Vulnerability Reporting。
+- [x] 创建首个预发布版本和 Release Notes。
 
 ## 公网部署前另行完成
 
