@@ -128,8 +128,8 @@ tests         自动测试和原创测试夹具
 - PWA 目前只有基础 manifest 和 Service Worker 挂载点，尚未完成完整离线缓存与更新提示。
 - 当前没有正式公网服务，也没有上架 Android 或 iOS。
 
-## 许可状态
+## 许可证
 
-当前尚未选择开源许可证。仓库公开后可供查看和个人测试，但这不等同于授予复制、修改或再分发代码的开源许可。正式开放外部贡献前需要由维护者选择许可证。
+ANISON 使用 [Apache License 2.0](LICENSE)。你可以在遵守许可证和 [NOTICE](NOTICE) 归属要求的前提下使用、修改和分发本项目。
 
-网易云歌词导入的协议流程和时间轴对齐思路参考了 [jitwxs/163MusicLyrics](https://github.com/jitwxs/163MusicLyrics)。归属和 Apache-2.0 参考说明见 [网易云导入文档](docs/netease-import.md)。
+网易云歌词导入的协议流程和时间轴对齐思路参考了 [jitwxs/163MusicLyrics](https://github.com/jitwxs/163MusicLyrics)。详细归属说明见 [网易云导入文档](docs/netease-import.md)。

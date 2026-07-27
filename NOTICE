@@ -1,0 +1,8 @@
+ANISON
+Copyright 2026 riiiveeer
+
+The NetEase public lyric import protocol flow and lyric timeline alignment
+approach were independently implemented with reference to jitwxs/163MusicLyrics:
+https://github.com/jitwxs/163MusicLyrics
+
+The referenced project is licensed under the Apache License, Version 2.0.

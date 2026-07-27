@@ -12,6 +12,7 @@
 - 单卡学习与上下滚动连读两种模式。
 - 曲库封面、搜索、编辑、删除和数据备份恢复。
 - GitHub Actions 自动测试、构建和高危依赖审计。
+- Apache License 2.0、NOTICE 和公开仓库协作说明。
 
 ### Changed
 

@@ -15,7 +15,7 @@
 
 - [x] Git 历史提交身份使用 GitHub noreply 邮箱，不暴露私人邮箱。
 - [x] 最后一次秘密信息、绝对路径和个人数据扫描无结果。
-- [ ] 选择开源许可证，或明确维持“仅供查看和测试”的无许可证状态。
+- [x] 选择 Apache License 2.0，并添加 LICENSE 与 NOTICE。
 - [x] 删除或确认所有旧 GitHub Actions 日志可公开。
 - [ ] 将仓库可见性从 Private 改为 Public。
 - [ ] 公开后启用 Private Vulnerability Reporting。
