@@ -189,6 +189,45 @@ test('IndexedDB v3: 恢复取消后从持久化恢复点回滚', async () => {
   await resetDatabase();
 });
 
+test('IndexedDB v3: 恢复快照原生分页完整覆盖多批次复合主键', async () => {
+  await resetDatabase();
+  const context = await initializeDatabase();
+  await migrateDatabaseV3(context);
+  const itemCount = 4101;
+  await runTransaction(context, ['cards', 'learningUnits'], 'readwrite', stores => {
+    for (let index = 0; index < itemCount; index += 1) {
+      const id = `card-${String(index).padStart(5, '0')}`;
+      const unitId = `unit-${String(index).padStart(5, '0')}`;
+      stores.cards.put({
+        songId: 'paged-restore',
+        id,
+        timestamp: index,
+        lyric: `歌词 ${index}`,
+        learningUnitId: unitId,
+      });
+      stores.learningUnits.put({
+        key: `paged-restore\u0000${unitId}`,
+        songId: 'paged-restore',
+        unitId,
+        state: 'new',
+      });
+    }
+  });
+
+  const repository = createDataRepository(context);
+  const backup = await repository.exportAll();
+  backup.cards[0] = { ...backup.cards[0], lyric: '恢复后的第一句' };
+  await repository.replaceAll(backup);
+  const restored = await repository.exportAll();
+
+  assert.equal(restored.cards.length, itemCount);
+  assert.equal(restored.learningUnits.length, itemCount);
+  assert.equal(restored.cards[0].lyric, '恢复后的第一句');
+  assert.equal(restored.cards.at(-1).id, `card-${String(itemCount - 1).padStart(5, '0')}`);
+  context.database.close();
+  await resetDatabase();
+});
+
 test('IndexedDB v3: 歌词替换保留未变化学习单元的状态', async () => {
   await resetDatabase();
   const context = await initializeDatabase();

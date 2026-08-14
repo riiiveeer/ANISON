@@ -1,6 +1,6 @@
 {
   "name": "anison",
-  "version": "1.0.0-beta.3",
+  "version": "1.0.0-beta.4",
   "private": true,
   "description": "面向日语歌曲歌词的本地优先学习工具",
   "license": "Apache-2.0",

@@ -40,6 +40,10 @@ test('@perf beta.1 的 1000 首/80000 卡在 30 秒内迁移到 v3', async ({ pa
     return result;
   });
 
+  console.log(`ANISON migration metrics: ${JSON.stringify({ migrationMs, ...counts })}`);
+  expect(counts).toEqual({ songs: 1000, cards: 80000, learningUnits: 80000 });
+  expect(migrationMs).toBeLessThan(30000);
+
   const restoreMs = await page.evaluate(async () => {
     const database = await new Promise((resolve, reject) => {
       const request = indexedDB.open('anison-study-db', 3);
@@ -56,9 +60,7 @@ test('@perf beta.1 的 1000 首/80000 卡在 30 秒内迁移到 v3', async ({ pa
     return duration;
   });
 
-  console.log(`ANISON migration metrics: ${JSON.stringify({ migrationMs, restoreMs, ...counts })}`);
-  expect(counts).toEqual({ songs: 1000, cards: 80000, learningUnits: 80000 });
-  expect(migrationMs).toBeLessThan(30000);
+  console.log(`ANISON restore metrics: ${JSON.stringify({ restoreMs, ...counts })}`);
   expect(restoreMs).toBeLessThan(10000);
 });
 

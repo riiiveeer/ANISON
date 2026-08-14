@@ -5,7 +5,7 @@ export const BUSINESS_STORES = [
   'progress', 'playlists', 'importJobs',
 ];
 const RESTORE_META_KEY = 'restore:active';
-const BATCH_SIZE = 500;
+const BATCH_SIZE = 2000;
 
 export function createDataRepository(dbContext) {
   return {
@@ -134,24 +134,17 @@ async function stageCurrentData(dbContext, sessionId, { signal, onProgress }) {
 }
 
 function readStorePage(dbContext, storeName, afterKey, limit) {
-  return runTransaction(dbContext, storeName, 'readonly', store =>
-    new Promise((resolve, reject) => {
-      const values = [];
-      let lastKey;
-      const range = afterKey === undefined ? undefined : IDBKeyRange.lowerBound(afterKey, true);
-      const request = store.openCursor(range);
-      request.onsuccess = () => {
-        const cursor = request.result;
-        if (!cursor || values.length >= limit) {
-          resolve({ values, lastKey });
-          return;
-        }
-        values.push(cursor.value);
-        lastKey = cursor.primaryKey;
-        cursor.continue();
-      };
-      request.onerror = () => reject(request.error);
-    }));
+  return runTransaction(dbContext, storeName, 'readonly', async store => {
+    const range = afterKey === undefined ? undefined : IDBKeyRange.lowerBound(afterKey, true);
+    const [values, keys] = await Promise.all([
+      requestToPromise(store.getAll(range, limit), `分页读取 ${storeName} 恢复快照失败`),
+      requestToPromise(store.getAllKeys(range, limit), `分页读取 ${storeName} 恢复快照主键失败`),
+    ]);
+    if (values.length !== keys.length) {
+      throw new Error(`${storeName} 恢复快照的记录与主键数量不一致`);
+    }
+    return { values, lastKey: keys.at(-1) };
+  });
 }
 
 async function writeBusinessData(dbContext, data, { signal, onProgress, phase }) {

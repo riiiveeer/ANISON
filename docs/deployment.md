@@ -109,7 +109,7 @@ npm run verify:deployment
 ```powershell
 $env:BETA_AUTH_USERNAME = Read-Host 'Beta username'
 $env:BETA_AUTH_PASSWORD = Read-Host 'Beta password'
-$env:ANISON_EXPECTED_VERSION = '1.0.0-beta.3'
+$env:ANISON_EXPECTED_VERSION = '1.0.0-beta.4'
 $env:ANISON_EXPECTED_COMMIT = '<full main commit SHA>'
 $env:ANISON_EXPECTED_CSP = 'report-only'
 npm run verify:deployment

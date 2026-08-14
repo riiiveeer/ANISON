@@ -545,7 +545,7 @@ Node 精确版本由根目录 `.node-version` 固定为 `24.14.1`；不在 Dashb
 
 详细施工批次、Blueprint 契约、固定 HTTPS 验收、CSP 收口、实机矩阵和回滚演练见 [阶段 D：Render 固定 HTTPS 部署、发布门禁与回滚施工方案](stage-d-render-deployment-plan.md)。
 
-状态：D0～D3 本地工程施工已完成，包含独立 A/B/C 基线提交、`render.yaml`、契约测试、只读部署验证器和运行手册；尚未推送阶段 D 分支、配置 `main` 必需检查或创建 Render 服务。临时 Cloudflare Tunnel 仅作为阶段 C 预验收，固定 `onrender.com` Origin 的正式记录仍须在 D4～D8 完成。
+状态：D0～D3 本地工程施工已完成，施工分支已推送并创建 PR #1；首次 Linux CI 暴露的大型恢复分页瓶颈已修复，等待三组 CI 复跑。`main` 必需检查和 Render 服务尚未配置。临时 Cloudflare Tunnel 仅作为阶段 C 预验收，固定 `onrender.com` Origin 的正式记录仍须在 D4～D8 完成。
 
 交付：
 
