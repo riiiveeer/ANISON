@@ -4,7 +4,7 @@
 
 ANISON 是一款面向日语歌曲歌词的本地优先学习工具。你可以导入 LRC 或网易云公开单曲歌词，在单卡和连读两种模式中熟悉歌词，并通过次日复习巩固真正需要学习的日语句子。
 
-> 当前状态：`1.0.0-beta.3` 朋友测试版。已完成生产 PWA 的安装资源、离线 App Shell 和用户确认更新；更新前仍建议先在设置页导出完整备份。
+> 当前状态：`1.0.0-beta.3` 朋友测试版。生产 PWA 与 Render Blueprint 已完成本地施工；固定 HTTPS 服务、真实手机和回滚验收仍须完成后才会公布为可用 Beta。更新前仍建议先在设置页导出完整备份。
 
 ## 主要功能
 
@@ -107,7 +107,13 @@ flowchart LR
 3. 已内置的网易云与 DeepSeek 接口限流、日志脱敏，以及部署平台的故障监控；
 4. 与 IndexedDB 数据版本兼容的更新策略。
 
-部署差异和推荐发布流程见 [部署与更新方案](docs/deployment.md)。
+仓库根目录的 `render.yaml` 描述 Singapore Free Node Web Service，并要求 GitHub CI 通过后才自动部署。部署完成后可运行只读冒烟：
+
+```bash
+npm run verify:deployment -- https://<service>.onrender.com
+```
+
+未提供 Beta 凭据时会验证公开 `/healthz` 和未认证 401；通过环境变量提供成对凭据后会继续验证 PWA 资源、缓存、MIME、安全头、版本/提交/BUILD_ID 和未知 API。部署差异、环境变量与回滚步骤见 [部署与更新方案](docs/deployment.md)。
 
 ## 隐私与安全
 
@@ -149,8 +155,8 @@ tests         自动测试和原创测试夹具
 - 网易云兼容接口不是公开稳定 API，可能因上游变化临时失效。
 - 不支持网易云登录、会员权限绕过、歌单/专辑批量导入或音频下载。
 - 电脑与手机之间暂不自动同步曲库。
-- Android/iPhone 的真实安装、刘海屏、软键盘和离线冷启动验收要等阶段 D 提供 HTTPS 地址后完成。
-- 当前没有正式公网服务，也没有上架 Android 或 iOS；安装 PWA 不会把其他域名或 localhost 的数据迁移过来。
+- Android/iPhone 的真实安装、刘海屏、软键盘和离线冷启动验收仍等待阶段 D 固定 HTTPS 服务。
+- 当前仓库只具备可复现的 Render 部署配置，尚未记录已验收的正式公网服务，也没有上架 Android 或 iOS；安装 PWA 不会把其他域名或 localhost 的数据迁移过来。
 
 ## 许可证
 

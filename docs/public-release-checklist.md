@@ -25,9 +25,12 @@
 
 ## 公网部署前另行完成
 
-- [ ] 使用正式 Node 服务，而不是 Vite 开发服务器。
-- [ ] 配置 HTTPS、域名、限流、安全响应头和日志脱敏。
-- [ ] 分离生产环境配置，不在前端打包共享 API Key。
-- [ ] 验证数据迁移、缓存更新和回滚流程。
+- [x] 仓库使用正式 Node 服务而不是 Vite 开发服务器，并提供 `/healthz`。
+- [x] 完成 Render Blueprint、秘密占位、限流、安全响应头、日志脱敏与部署冒烟工具。
+- [x] 分离生产环境配置，不在前端打包共享 API Key。
+- [ ] 在固定 HTTPS Origin 验证缓存更新、数据保留和 Render 回滚流程。
+- [ ] 配置 `main` 三项必需检查并确认失败提交不会自动部署。
+- [ ] 创建 Render Singapore Free 服务，现场配置 Beta Secrets，并记录 canonical Origin。
 - [ ] 在正式 HTTPS 地址完成 Android Chrome 与 iPhone Safari 安装、离线冷启动和恢复在线验收。
+- [ ] 完成真实网易云/DeepSeek 最小请求、CSP Enforce 切换和最终部署冒烟。
 - [ ] 发布适用于实际运营者和地区的隐私说明。

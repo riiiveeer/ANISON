@@ -13,6 +13,8 @@
 - 生产服务器集成测试，覆盖静态缓存策略、入口启动和优雅关闭。
 - Vite/Express 共用的网易云与 DeepSeek 中间件、统一 API 错误结构、请求上下文和脱敏日志。
 - Helmet、Compression、CSP Report-Only/Enforce 切换及可选 Beta Basic-to-Cookie 门禁。
+- Render Singapore Free Blueprint、Blueprint 秘密约束测试和 CI 通过后自动部署契约。
+- 固定 HTTPS 只读部署验证器，覆盖冷启动、Beta 401、静态缓存、PWA 元数据、安全头和 API JSON 边界。
 
 ### Changed
 

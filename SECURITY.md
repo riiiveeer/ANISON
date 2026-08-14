@@ -36,3 +36,6 @@
 - Service Worker 只缓存构建清单内的同源 GET 静态资源；`/api/*`、Authorization、非 GET、第三方封面和未知路径不进入 Cache Storage。
 - Worker 更新不自动 `skipWaiting`。用户确认前继续运行旧版本，导入、编辑和恢复期间禁止触发刷新；缓存清理只能删除 `anison-shell-` 和 `anison-runtime-` 前缀。
 - `sw.js` 必须保持 `no-cache` 和根 scope。紧急恢复 worker 不得调用 `indexedDB.deleteDatabase`、`localStorage.clear()` 或业务清空接口。
+- Render 部署必须以根目录 `render.yaml` 为契约，Beta 凭据使用 `sync: false` 并由运营者在 Dashboard 现场输入；Blueprint 不声明 `PORT`、服务端 DeepSeek Key、数据库或磁盘。
+- 固定 HTTPS 部署应使用 `npm run verify:deployment` 验证 401、缓存、MIME、安全头、版本/提交/BUILD_ID 和 API JSON 边界。凭据只通过临时环境变量提供，完成后立即清除。
+- CSP 从 Report-Only 切换为 Enforce、生产回滚和恢复 Auto Deploy 都是显式运维变更，必须记录目标部署和验证结果。

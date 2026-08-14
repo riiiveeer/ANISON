@@ -70,6 +70,60 @@ npm start
 
 Beta 门禁首次使用浏览器 Basic Auth，验证成功后换取 12 小时的 HttpOnly、SameSite=Strict Cookie；生产 Cookie 带 `Secure`。服务重启、Cookie 到期或切换域名后需要重新验证。`/healthz` 始终免鉴权，DeepSeek 继续独占 `Authorization: Bearer`。
 
+## 阶段 D：Render Blueprint 部署
+
+根目录 `render.yaml` 是唯一部署契约：Singapore、Free、Node、`main`、`npm ci && npm run build`、`npm start`、`/healthz` 和 `checksPass` 均由版本库声明。Node 精确版本来自 `.node-version`，不要在 Render Dashboard 额外设置优先级更高的 `NODE_VERSION`。
+
+首次创建前必须确认 GitHub `main` 已要求以下三个检查：
+
+- `test-and-build`
+- `browser-e2e-and-performance`
+- `production-pwa`
+
+在 Render Dashboard 选择 Blueprint 并连接 `riiiveeer/ANISON`，服务名优先使用 `anison-web`；若冲突则固定使用 `anison-web-riiiveeer`。创建页面必须现场填写 `BETA_AUTH_USERNAME` 和 `BETA_AUTH_PASSWORD`，两项均保存到运营者自己的密码管理器。不要添加 `PORT`、服务端 DeepSeek Key、网易云 Cookie、数据库、磁盘或定时探活。
+
+首次环境固定为：
+
+| 项目 | 值 |
+| --- | --- |
+| Region / Plan | Singapore / Free |
+| Branch | `main` |
+| Auto Deploy | After CI Checks Pass |
+| `NODE_ENV` | `production` |
+| `CSP_MODE` | `report-only` |
+| Health Check | `/healthz` |
+
+Blueprint 中 `sync: false` 的变量只会在首次创建时提示输入；为既有服务新增或轮换 Secret 时必须在 Dashboard 的 Environment 页面操作。
+
+### 只读部署冒烟
+
+固定 Origin 创建后，先在不设置凭据的 shell 验证公开边界：
+
+```powershell
+$env:ANISON_DEPLOYMENT_URL = 'https://<service>.onrender.com'
+npm run verify:deployment
+```
+
+随后在临时 shell 中设置 Beta 凭据并执行完整验证。不要把真实值写入 `.env`、命令脚本、Issue 或截图；运行完成后清除环境变量。
+
+```powershell
+$env:BETA_AUTH_USERNAME = Read-Host 'Beta username'
+$env:BETA_AUTH_PASSWORD = Read-Host 'Beta password'
+$env:ANISON_EXPECTED_VERSION = '1.0.0-beta.3'
+$env:ANISON_EXPECTED_COMMIT = '<full main commit SHA>'
+$env:ANISON_EXPECTED_CSP = 'report-only'
+npm run verify:deployment
+Remove-Item Env:BETA_AUTH_USERNAME, Env:BETA_AUTH_PASSWORD, Env:ANISON_EXPECTED_VERSION, Env:ANISON_EXPECTED_COMMIT, Env:ANISON_EXPECTED_CSP -ErrorAction SilentlyContinue
+```
+
+验证器最多等待 90 秒唤醒 Free 实例；服务已唤醒后的健康请求预算为 5 秒。它不会请求真实网易云或 DeepSeek，也不会打印凭据、Cookie、Authorization、歌词或 Key。
+
+### CSP 强制与部署记录
+
+完成首页、导入、学习、复习、设置、安装、更新和第三方封面检查，且浏览器控制台与 Render 日志没有真实 CSP 违规后，才把 Dashboard 中的 `CSP_MODE` 改为 `enforce`。重新部署后设置 `ANISON_EXPECTED_CSP=enforce` 再跑完整冒烟。
+
+公开记录只包含 canonical Origin、部署提交、BUILD_ID、部署时间、冷启动时间和验收结果。Render Service ID、Beta 凭据、用户内容和上游 Key 保存在公开仓库之外。
+
 ## 公网接口限制
 
 | 接口 | 请求体 | IP 限制 | 上游超时 |
@@ -95,7 +149,7 @@ API 只接受精确同源浏览器请求，并要求前端自动发送 `X-ANISON
 1. 功能分支开发并创建 Pull Request。
 2. GitHub Actions 执行 `npm ci`、测试、构建和依赖审计。
 3. 合并到 `main`。
-4. 更新 `CHANGELOG.md` 和 `package.json` 版本号。
+4. 更新 `CHANGELOG.md`；只有应用行为变化时才更新 `package.json` 版本号，纯部署或文档提交保持当前业务版本。
 5. 创建 `vX.Y.Z` 标签和 GitHub Release。
 6. 自动部署到测试环境，完成网易云导入和移动端冒烟测试。
 7. 部署正式环境。
@@ -128,8 +182,10 @@ API 只接受精确同源浏览器请求，并要求前端自动发送 `X-ANISON
 
 ## PWA 故障与回滚
 
-1. 回滚时保持 `/sw.js` 和 manifest `id: "/"` 不变，让已安装客户端能够取得恢复 worker。
-2. 回滚 worker 只能清理 `anison-shell-`、`anison-runtime-` 缓存，不得删除 IndexedDB 或 localStorage。
-3. 若缓存逻辑本身故障，发布不拦截 fetch 的 pass-through worker，激活后通知客户端刷新。
-4. 验证 `/healthz`、`/sw.js`、首页、离线 App Shell 和两条 API；Beta 401 不得被离线 HTML 掩盖。
-5. 域名变化前先从旧 Origin 导出备份，再在新 Origin 恢复；安装 PWA 不会迁移 Origin 数据。
+1. 在 Render Deploys 明确选择目标成功部署，不使用模糊的“上一版”判断。
+2. 回滚时保持 `/sw.js` 和 manifest `id: "/"` 不变，让已安装客户端能够取得恢复 worker。
+3. 回滚 worker 只能清理 `anison-shell-`、`anison-runtime-` 缓存，不得删除 IndexedDB 或 localStorage。
+4. 若缓存逻辑本身故障，发布不拦截 fetch 的 pass-through worker，激活后通知客户端刷新。
+5. 回滚后运行部署验证器，并手工验证离线 App Shell、两条真实 API 边界和 IndexedDB 数据；Beta 401 不得被离线 HTML 掩盖。
+6. Render Dashboard Rollback 会暂停 Auto Deploy；确认故障被隔离后，人工部署最新已验证提交并恢复 `checksPass`。
+7. 域名变化前先从旧 Origin 导出备份，再在新 Origin 恢复；安装 PWA 不会迁移 Origin 数据。

@@ -51,3 +51,5 @@ ANISON Node 服务不会保存、缓存或写入日志中的 DeepSeek Key、Auth
 部署公开 ANISON 服务的人应自行提供适用的隐私说明，并配置 HTTPS、访问限制、日志保留周期、密钥保护和异常监控。本仓库中的本地开发默认值不等同于生产环境隐私承诺。
 
 当前服务日志只包含 requestId、HTTP 方法、路由路径、状态码、耗时和错误码，不包含客户端 IP、请求体、Cookie 或 Authorization。
+
+阶段 D 的 Render Free 服务不配置数据库、Key Value 或持久磁盘。Render 构建和运行文件系统不承载用户歌曲、歌词、学习进度、备份或 AI 缓存；这些数据仍留在各设备浏览器。运营者只公开 canonical Origin、部署提交、BUILD_ID、部署时间与脱敏验收结果，服务 ID、Beta 凭据和用户内容不写入公开仓库。

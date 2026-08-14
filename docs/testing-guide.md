@@ -28,7 +28,31 @@ npm run dev:lan
 
 优先在约 `390 × 844` 的手机屏幕上完成一次完整流程。
 
-## 3. 反馈 Bug
+## 3. 固定 HTTPS 阶段 D 验收
+
+只有维护者明确公布 canonical `onrender.com` Origin 后才执行本节。临时 Tunnel、localhost 和固定 Origin 的 IndexedDB 彼此独立；需要迁移测试数据时先从旧 Origin 导出，再在固定 Origin 恢复。
+
+先记录版本证据：固定 Origin、浏览器版本、ANISON 版本、提交短 SHA、BUILD_ID、网络类型和测试时间。不要在记录或截图中包含 Beta 密码、DeepSeek Key、完整歌词或备份。
+
+| 平台 | 必测项目 |
+| --- | --- |
+| Android Chrome | 安装提示、maskable 图标、standalone、WiFi/移动网络、飞行模式冷启动、后台恢复 |
+| iPhone Safari | 分享→添加到主屏幕、Apple 图标、安全区、软键盘、离线重开、恢复在线 |
+| Windows Chrome/Edge | 安装、独立窗口、缩放、检查更新、更新后单次刷新 |
+
+每台设备按同一顺序验收：
+
+1. 在线首次打开，导入一首不含私人内容的测试歌曲，完成学习、收藏和评分并导出备份。
+2. 记录歌曲数、进度、收藏、评分、版本、提交和 BUILD_ID。
+3. 断网后彻底关闭并重开 PWA，确认本地曲库、学习、复习和导出可用，联网入口显示降级提示。
+4. 恢复网络并验证应用自动恢复，不要求清除站点数据或重新安装。
+5. 部署第二个 BUILD_ID 后先选择“稍后”，再选择“立即更新”；确认只刷新一次且 IndexedDB 数据不变。
+6. 在备份恢复期间确认“立即更新”被禁用，操作完成后恢复可用。
+7. Android 分别通过 WiFi 和移动网络执行一次核心冒烟；记录 Free 冷启动等待和中国大陆网络差异。
+
+若任一设备出现数据丢失、更新循环、API 返回 App Shell、CSP 阻断或无法离线重开，阶段 D 不得标记完成。
+
+## 4. 反馈 Bug
 
 创建 Issue 时请提供：
 
@@ -41,7 +65,7 @@ npm run dev:lan
 
 不要提交 DeepSeek Key、完整个人歌词库、网易云 Cookie 或包含敏感信息的数据备份。
 
-## 4. 常见问题
+## 5. 常见问题
 
 ### 手机打不开 Network 地址
 
@@ -65,4 +89,4 @@ npm run dev:lan
 - 首次必须在线打开并完成 Service Worker 激活，之后才能离线重开。
 - iPhone Safari 使用“分享 → 添加到主屏幕”，不依赖网页安装弹窗。
 
-阶段 C 自动化已经覆盖 Chromium 离线与更新流程。Android Chrome、iPhone Safari 的真实安装、安全区、软键盘和离线冷启动保留为阶段 D HTTPS 部署前门禁。
+阶段 C 自动化已经覆盖 Chromium 离线与更新流程。Android Chrome、iPhone Safari 的真实安装、安全区、软键盘和离线冷启动仍是阶段 D 固定 HTTPS 发布门禁，不能用桌面模拟替代。
