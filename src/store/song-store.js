@@ -144,6 +144,15 @@ class SongStore {
 
   setCurrentSongProgress(progress = null) {
     if (!progress) return;
+    if (progress.changedUnit?.unitId) {
+      this.cards = this.cards.map(card => (
+        card.learningUnit?.id === progress.changedUnit.unitId
+          ? { ...card, learning: { ...card.learning, ...progress.changedUnit.learning } }
+          : card
+      ));
+      return;
+    }
+    if (progress.storageVersion === 3) return;
     this.cards = applyLearningUnitProgress(this.cards, progress);
   }
 

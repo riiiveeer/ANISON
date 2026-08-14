@@ -3,12 +3,17 @@
  * 功能：逐句调用 DeepSeek 生成词汇/语法讲解，结果缓存在 localStorage
  */
 
+import {
+  DEFAULT_DEEPSEEK_MODEL,
+  SUPPORTED_DEEPSEEK_MODELS,
+} from '../../shared/deepseek-config.js';
+import { createOfflineError, normalizeNetworkFailure } from '../pwa/network-status.js';
+
 const CACHE_PREFIX = 'ai_exp_';
 const MAX_CACHE_ENTRIES = 50;
 const API_ENDPOINT = '/api/deepseek/chat/completions';
 export const DEEPSEEK_MODEL_STORAGE_KEY = 'anison_ds_model';
-export const DEFAULT_DEEPSEEK_MODEL = 'deepseek-v4-flash';
-export const SUPPORTED_DEEPSEEK_MODELS = ['deepseek-v4-flash', 'deepseek-v4-pro'];
+export { DEFAULT_DEEPSEEK_MODEL, SUPPORTED_DEEPSEEK_MODELS };
 
 export function normalizeDeepSeekModel(model) {
   return SUPPORTED_DEEPSEEK_MODELS.includes(model) ? model : DEFAULT_DEEPSEEK_MODEL;
@@ -79,7 +84,15 @@ function getCache(key) {
  * @param {string} followUpQuestion 追问内容（可选）
  * @returns {Promise<string>} AI 讲解文本
  */
-export async function explainLyrics(jpText, zhText, romajiText, songContext, apiKey, followUpQuestion = '') {
+export async function explainLyrics(
+  jpText,
+  zhText,
+  romajiText,
+  songContext,
+  apiKey,
+  followUpQuestion = '',
+  requestOptions = {},
+) {
   if (!apiKey) throw new Error('请先设置 DeepSeek API Key');
   const model = getConfiguredDeepSeekModel();
 
@@ -88,24 +101,35 @@ export async function explainLyrics(jpText, zhText, romajiText, songContext, api
   const cached = getCache(cacheKey);
   if (cached) return cached;
 
+  const isOnline = requestOptions.isOnline || (() => globalThis.navigator?.onLine !== false);
+  if (!isOnline()) throw createOfflineError('当前离线，已有本地内容仍可学习；联网后可继续使用 AI 讲解');
+
   // 构建 Prompt
   const prompt = buildPrompt(jpText, zhText, romajiText, songContext, followUpQuestion);
 
   // 调用 API
-  const res = await fetch(API_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'user', content: prompt }],
-      thinking: { type: 'disabled' },
-      temperature: 0.3,
-      max_tokens: 800,
-    }),
-  });
+  const fetchImpl = requestOptions.fetchImpl || globalThis.fetch;
+  let res;
+  try {
+    res = await fetchImpl(API_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-ANISON-Request': '1',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        thinking: { type: 'disabled' },
+        temperature: 0.3,
+        max_tokens: 800,
+      }),
+      signal: requestOptions.signal,
+    });
+  } catch (error) {
+    throw normalizeNetworkFailure(error, 'AI 服务连接中断，请联网后重试');
+  }
 
   if (!res.ok) {
     const errBody = await res.text();

@@ -23,10 +23,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      - name: Use Node.js 20
+      - name: Use Node.js 24
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -40,3 +40,60 @@ jobs:
 
       - name: Audit high-severity dependency issues
         run: npm audit --audit-level=high
+
+  browser-e2e-and-performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run core browser flow
+        run: npm run test:e2e
+
+      - name: Run 1000-song / 80000-card performance gate
+        run: npm run test:perf
+
+  production-pwa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run production PWA flows
+        run: npm run test:pwa
+
+      - name: Upload PWA traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pwa-playwright-results
+          path: test-results/
+          if-no-files-found: ignore

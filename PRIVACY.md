@@ -13,6 +13,8 @@
 
 这些数据不会因为电脑和手机访问同一个地址而自动同步。清除浏览器站点数据可能导致数据丢失，请定期使用设置页的完整导出功能备份。
 
+PWA 的 Cache Storage 只保存 ANISON 的 HTML、JavaScript、CSS、manifest 和本地图标，不保存用户歌曲、歌词、学习进度、DeepSeek Key、AI 响应或网易云请求。应用更新和旧缓存清理不会删除 IndexedDB 或 localStorage；浏览器自身清除站点数据仍可能同时删除它们。
+
 ## 网易云歌词导入
 
 用户粘贴的公开单曲链接、分享文本或歌曲 ID 会发送到运行 ANISON 的 Node 服务。服务会提取歌曲 ID并请求公开歌曲信息和歌词轨道。
@@ -26,7 +28,9 @@
 
 ## AI 讲解
 
-启用 AI 讲解时，ANISON 会把当前歌词、翻译、罗马音、必要的歌曲上下文和追问内容发送给 DeepSeek API。浏览器提供的 DeepSeek Key 会通过当前 ANISON Node 代理转发给 DeepSeek。
+启用 AI 讲解时，ANISON 会把当前歌词、翻译、罗马音、必要的歌曲上下文和追问内容发送给 DeepSeek API。浏览器提供的 DeepSeek Key 会先经过当前 ANISON Node 服务，再转发给 DeepSeek；HTTPS 保护传输过程，但不意味着 ANISON 服务在技术上“看不到”该 Key。
+
+ANISON Node 服务不会保存、缓存或写入日志中的 DeepSeek Key、Authorization、Prompt、歌词上下文或 AI 完整响应，也不会读取任何服务端 DeepSeek Key 环境变量。AI 讲解结果缓存和用户填写的 Key 仍只保存在当前浏览器的 localStorage；清除站点数据会一并删除。
 
 请不要在歌词、追问或 Issue 中输入不希望发送给第三方的个人信息。
 
@@ -40,6 +44,10 @@
 
 删除 GitHub 仓库、停止 Node 服务或更新网页都不会自动删除各用户浏览器中的 IndexedDB 数据。
 
+安装到主屏幕不会把 localhost、旧域名或其他设备的数据迁移到当前域名。更换域名时需要在旧地址导出备份并在新地址恢复。
+
 ## 公开部署者责任
 
 部署公开 ANISON 服务的人应自行提供适用的隐私说明，并配置 HTTPS、访问限制、日志保留周期、密钥保护和异常监控。本仓库中的本地开发默认值不等同于生产环境隐私承诺。
+
+当前服务日志只包含 requestId、HTTP 方法、路由路径、状态码、耗时和错误码，不包含客户端 IP、请求体、Cookie 或 Authorization。

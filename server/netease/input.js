@@ -113,7 +113,12 @@ async function resolveAllowedShortLink(initialUrl, options) {
   let currentUrl = initialUrl;
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
     assertAllowedUrl(currentUrl);
-    const response = await fetchWithTimeout(fetchImpl, currentUrl, options.shortLinkTimeoutMs || 5000);
+    const response = await fetchWithTimeout(
+      fetchImpl,
+      currentUrl,
+      options.shortLinkTimeoutMs || 5000,
+      options.signal,
+    );
 
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('location');
@@ -152,14 +157,15 @@ function assertAllowedUrl(url) {
   }
 }
 
-async function fetchWithTimeout(fetchImpl, url, timeoutMs) {
+async function fetchWithTimeout(fetchImpl, url, timeoutMs, parentSignal) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const signal = parentSignal ? AbortSignal.any([controller.signal, parentSignal]) : controller.signal;
   try {
     return await fetchImpl(url, {
       method: 'GET',
       redirect: 'manual',
-      signal: controller.signal,
+      signal,
       headers: {
         'User-Agent': 'Mozilla/5.0 ANISON-Lyric-Importer',
         Referer: 'https://music.163.com/',
@@ -167,6 +173,13 @@ async function fetchWithTimeout(fetchImpl, url, timeoutMs) {
     });
   } catch (error) {
     if (error?.name === 'AbortError') {
+      if (parentSignal?.aborted) {
+        const timeoutError = new Error('连接网易云超时，请检查网络后重试');
+        timeoutError.code = 'UPSTREAM_TIMEOUT';
+        timeoutError.status = 504;
+        timeoutError.retryable = true;
+        throw timeoutError;
+      }
       throw new NeteaseInputError('INVALID_INPUT', '解析网易云短链接超时');
     }
     throw new NeteaseInputError('INVALID_INPUT', '解析网易云短链接失败');

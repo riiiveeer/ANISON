@@ -7,11 +7,12 @@
  */
 
 import { analyzeLyricTrackBundle } from './song-importer.js';
+import { createOfflineError, normalizeNetworkFailure } from '../pwa/network-status.js';
 
-export function createLyricProviderRegistry() {
+export function createLyricProviderRegistry(options = {}) {
   const providers = {
     'manual-text': createManualTextLyricProvider(),
-    netease: createNeteaseLyricProvider(),
+    netease: createNeteaseLyricProvider(options),
   };
 
   return {
@@ -56,24 +57,31 @@ export function createManualTextLyricProvider() {
 
 export function createNeteaseLyricProvider(options = {}) {
   const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const isOnline = options.isOnline || (() => globalThis.navigator?.onLine !== false);
   return {
     source: 'netease',
     async previewSong(input, requestOptions = {}) {
       if (typeof fetchImpl !== 'function') {
         throw new Error('当前浏览器无法连接本地歌词服务');
       }
+      if (!isOnline()) {
+        throw createOfflineError('当前离线，无法解析网易云链接；本地 LRC 导入和学习仍可使用');
+      }
 
       let response;
       try {
         response = await fetchImpl('/api/netease/preview', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-ANISON-Request': '1',
+          },
           body: JSON.stringify({ input: String(input || '') }),
           signal: requestOptions.signal,
         });
       } catch (error) {
         if (error?.name === 'AbortError') throw error;
-        throw new Error('无法连接本地歌词服务，请确认 ANISON 是通过 npm 启动的');
+        throw normalizeNetworkFailure(error, '无法连接歌词服务，请检查网络后重试');
       }
 
       const payload = await readJsonResponse(response);

@@ -7,12 +7,36 @@
  */
 
 export const ANISON_DB_NAME = 'anison-study-db';
-export const ANISON_DB_VERSION = 2;
+export const ANISON_DB_VERSION = 3;
 
 const STORE_DEFINITIONS = {
   songs: {
     keyPath: 'id',
-    indexes: ['title', 'artist', 'updatedAt', 'lastStudiedAt'],
+    indexes: [
+      'title', 'artist', 'updatedAt', 'lastStudiedAt',
+      'contentHash', 'fileNameKey', 'titleArtistKey', 'sourceKey',
+    ],
+  },
+  songLyrics: {
+    keyPath: 'songId',
+    indexes: [],
+  },
+  cards: {
+    keyPath: ['songId', 'id'],
+    indexes: [
+      { name: 'songId', keyPath: 'songId' },
+      { name: 'songLearningUnit', keyPath: ['songId', 'learningUnitId'] },
+    ],
+  },
+  learningUnits: {
+    keyPath: 'key',
+    indexes: [
+      'songId',
+      { name: 'state', keyPath: ['state', 'activityAt', 'key'] },
+      { name: 'due', keyPath: ['reviewableKey', 'nextReviewAt', 'key'] },
+      { name: 'history', keyPath: ['historyKey', 'activityAt', 'key'] },
+      { name: 'favorites', keyPath: ['favoriteKey', 'activityAt', 'key'] },
+    ],
   },
   playlists: {
     keyPath: 'id',
@@ -25,6 +49,14 @@ const STORE_DEFINITIONS = {
   progress: {
     keyPath: 'songId',
     indexes: ['lastStudiedAt', 'completionRate'],
+  },
+  meta: {
+    keyPath: 'key',
+    indexes: [],
+  },
+  recovery: {
+    keyPath: ['sessionId', 'storeName', 'sequence'],
+    indexes: ['sessionId'],
   },
 };
 
@@ -41,20 +73,22 @@ export async function initializeDatabase() {
   };
 }
 
-function upgradeDatabase(database) {
+function upgradeDatabase(database, oldVersion, newVersion, upgradeTransaction) {
   Object.entries(STORE_DEFINITIONS).forEach(([storeName, definition]) => {
     if (!database.objectStoreNames.contains(storeName)) {
       const store = database.createObjectStore(storeName, { keyPath: definition.keyPath });
-      definition.indexes.forEach(indexName => {
-        store.createIndex(indexName, indexName, { unique: false });
+      definition.indexes.forEach(index => {
+        const normalized = normalizeIndexDefinition(index);
+        store.createIndex(normalized.name, normalized.keyPath, { unique: normalized.unique });
       });
       return;
     }
 
-    const transactionStore = database.transaction.objectStore(storeName);
-    definition.indexes.forEach(indexName => {
-      if (!transactionStore.indexNames.contains(indexName)) {
-        transactionStore.createIndex(indexName, indexName, { unique: false });
+    const transactionStore = upgradeTransaction.objectStore(storeName);
+    definition.indexes.forEach(index => {
+      const normalized = normalizeIndexDefinition(index);
+      if (!transactionStore.indexNames.contains(normalized.name)) {
+        transactionStore.createIndex(normalized.name, normalized.keyPath, { unique: normalized.unique });
       }
     });
   });
@@ -66,7 +100,12 @@ function openDatabase(name, version, onUpgradeNeeded) {
 
     request.onupgradeneeded = event => {
       const database = event.target.result;
-      onUpgradeNeeded(database, event.oldVersion, event.newVersion || version);
+      onUpgradeNeeded(
+        database,
+        event.oldVersion,
+        event.newVersion || version,
+        event.target.transaction,
+      );
     };
 
     request.onsuccess = () => {
@@ -84,8 +123,10 @@ export async function runTransaction(dbContext, storeName, mode, executor) {
   }
 
   return new Promise((resolve, reject) => {
-    const transaction = dbContext.database.transaction(storeName, mode);
-    const store = transaction.objectStore(storeName);
+    const storeNames = Array.isArray(storeName) ? storeName : [storeName];
+    const transaction = dbContext.database.transaction(storeNames, mode);
+    const stores = Object.fromEntries(storeNames.map(name => [name, transaction.objectStore(name)]));
+    const store = storeNames.length === 1 ? stores[storeNames[0]] : stores;
     let executorResult;
 
     Promise.resolve()
@@ -94,6 +135,11 @@ export async function runTransaction(dbContext, storeName, mode, executor) {
         executorResult = result;
       })
       .catch(error => {
+        try {
+          transaction.abort();
+        } catch {
+          // 事务可能已经因底层请求失败而自动中止。
+        }
         reject(createStorageError(`执行 ${storeName} 事务失败`, error));
       });
 
@@ -110,6 +156,23 @@ export function requestToPromise(request, message = '数据库请求失败') {
   });
 }
 
+export function deleteByIndex(store, indexName, key, message = '删除关联数据失败') {
+  return new Promise((resolve, reject) => {
+    const request = store.index(indexName).openKeyCursor(IDBKeyRange.only(key));
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        resolve();
+        return;
+      }
+      const deleteRequest = store.delete(cursor.primaryKey);
+      deleteRequest.onsuccess = () => cursor.continue();
+      deleteRequest.onerror = () => reject(createStorageError(message, deleteRequest.error));
+    };
+    request.onerror = () => reject(createStorageError(message, request.error));
+  });
+}
+
 export function createStorageError(message, cause = null) {
   const error = new Error(message);
   error.name = 'AnisonStorageError';
@@ -117,4 +180,15 @@ export function createStorageError(message, cause = null) {
     error.cause = cause;
   }
   return error;
+}
+
+function normalizeIndexDefinition(index) {
+  if (typeof index === 'string') {
+    return { name: index, keyPath: index, unique: false };
+  }
+  return {
+    name: index.name,
+    keyPath: index.keyPath || index.name,
+    unique: Boolean(index.unique),
+  };
 }

@@ -1,6 +1,8 @@
 import { createLibraryStore } from '../store/library-store.js';
 import { escapeAttr, escapeHtml, formatTimeLabel, sanitizeCoverImageUrl } from './dom-utils.js';
 
+const SONG_BATCH_SIZE = 50;
+
 export async function createLibraryView({ context, navigate, query }) {
   if (!context.dbReady) {
     const unavailable = document.createElement('section');
@@ -17,10 +19,12 @@ export async function createLibraryView({ context, navigate, query }) {
     return { element: unavailable };
   }
 
-  const libraryStore = createLibraryStore(context.repositories);
+  const libraryStore = createLibraryStore(context.repositories, { networkStatus: context.networkStatus });
+  let online = context.networkStatus?.getState?.().online !== false;
   let currentSort = 'recent-imported';
   let songs = await libraryStore.listSongs(currentSort);
   let searchTerm = '';
+  let visibleSongLimit = SONG_BATCH_SIZE;
   let importOpen = query.import === '1';
   let importTab = 'netease';
   let importMessage = '';
@@ -37,10 +41,23 @@ export async function createLibraryView({ context, navigate, query }) {
   const element = document.createElement('section');
   element.className = 'page page-library';
   render();
+  const unsubscribeNetwork = context.networkStatus?.subscribe?.(nextState => {
+    if (online === nextState.online) return;
+    online = nextState.online;
+    render();
+  });
 
-  return { element };
+  return {
+    element,
+    destroy() {
+      unsubscribeNetwork?.();
+      activeImportController?.abort();
+    },
+  };
 
   function render() {
+    const filteredSongs = getFilteredSongs();
+    const visibleSongs = filteredSongs.slice(0, visibleSongLimit);
     element.innerHTML = `
       <div class="page-heading">
         <div>
@@ -64,9 +81,14 @@ export async function createLibraryView({ context, navigate, query }) {
       <section class="library-list-section">
         ${songs.length ? `
           <ul class="song-list clean-song-list">
-            ${songs.map(renderSongRow).join('')}
+            ${visibleSongs.map(renderSongRow).join('')}
           </ul>
-          <div id="search-empty" class="empty-block hidden">没有找到匹配的歌曲。</div>
+          ${filteredSongs.length ? '' : '<div id="search-empty" class="empty-block">没有找到匹配的歌曲。</div>'}
+          ${visibleSongs.length < filteredSongs.length ? `
+            <button class="btn-outline full-width" type="button" data-action="load-more-songs">
+              显示更多（剩余 ${filteredSongs.length - visibleSongs.length} 首）
+            </button>
+          ` : ''}
         ` : `
           <div class="empty-block spacious-empty">
             <div class="empty-icon">🎵</div>
@@ -81,7 +103,6 @@ export async function createLibraryView({ context, navigate, query }) {
       ${importOpen ? renderImportSheet() : ''}
     `;
     bindEvents();
-    applySearch();
   }
 
   function renderSongRow(song) {
@@ -208,9 +229,9 @@ export async function createLibraryView({ context, navigate, query }) {
             网易云公开单曲链接或分享文本
             <textarea name="input" class="netease-link-input" required placeholder="粘贴网易云歌曲链接、完整分享文本，或输入歌曲 ID">${escapeHtml(neteaseInput)}</textarea>
           </label>
-          <p class="muted small">仅支持公开单曲，不需要登录网易云。解析完成前不会写入曲库。</p>
-          <button class="primary-btn full-width" type="submit"${busy ? ' disabled' : ''}>
-            ${busy ? '正在解析歌词…' : '解析歌词'}
+          <p class="muted small">${online ? '仅支持公开单曲，不需要登录网易云。解析完成前不会写入曲库。' : '当前离线，无法解析链接；本地 LRC 导入和学习仍可使用。'}</p>
+          <button class="primary-btn full-width" type="submit"${busy || !online ? ' disabled' : ''}>
+            ${busy ? '正在解析歌词…' : online ? '解析歌词' : '联网后解析'}
           </button>
         </form>
       `;
@@ -222,9 +243,8 @@ export async function createLibraryView({ context, navigate, query }) {
       <div class="import-panel netease-preview-card">
         <div class="netease-song-preview">
           <span class="netease-cover">
-            ${song.coverUrl
-              ? `<img src="${escapeAttr(song.coverUrl)}" alt="" referrerpolicy="no-referrer" data-netease-cover />`
-              : escapeHtml((song.title || '歌').slice(0, 1))}
+            <span aria-hidden="true">${escapeHtml((song.title || '歌').slice(0, 1))}</span>
+            ${song.coverUrl ? `<img src="${escapeAttr(song.coverUrl)}" alt="" referrerpolicy="no-referrer" data-netease-cover />` : ''}
           </span>
           <span class="netease-song-copy">
             <strong>${escapeHtml(song.title || '未命名歌曲')}</strong>
@@ -314,10 +334,19 @@ export async function createLibraryView({ context, navigate, query }) {
     element.querySelector('[data-action="retry-import-job"]')?.addEventListener('click', retryImportJob);
     element.querySelector('#song-search')?.addEventListener('input', event => {
       searchTerm = event.target.value;
-      applySearch();
+      visibleSongLimit = SONG_BATCH_SIZE;
+      render();
+      const input = element.querySelector('#song-search');
+      input?.focus();
+      input?.setSelectionRange(searchTerm.length, searchTerm.length);
+    });
+    element.querySelector('[data-action="load-more-songs"]')?.addEventListener('click', () => {
+      visibleSongLimit += SONG_BATCH_SIZE;
+      render();
     });
     element.querySelector('#song-sort')?.addEventListener('change', async event => {
       currentSort = event.target.value;
+      visibleSongLimit = SONG_BATCH_SIZE;
       songs = await libraryStore.listSongs(currentSort);
       render();
     });
@@ -339,14 +368,19 @@ export async function createLibraryView({ context, navigate, query }) {
     element.querySelectorAll('[data-edit-form]').forEach(form => {
       form.addEventListener('submit', async event => {
         event.preventDefault();
-        const data = new FormData(form);
-        await libraryStore.updateSongMeta(form.dataset.editForm, {
-          title: data.get('title'),
-          artist: data.get('artist'),
-        });
-        editingSongId = '';
-        songs = await libraryStore.listSongs(currentSort);
-        render();
+        const release = context.criticalOperations?.acquire?.('song-edit') || (() => {});
+        try {
+          const data = new FormData(form);
+          await libraryStore.updateSongMeta(form.dataset.editForm, {
+            title: data.get('title'),
+            artist: data.get('artist'),
+          });
+          editingSongId = '';
+          songs = await libraryStore.listSongs(currentSort);
+          render();
+        } finally {
+          release();
+        }
       });
     });
     element.querySelectorAll('[data-action="delete-song"]').forEach(button => {
@@ -355,15 +389,21 @@ export async function createLibraryView({ context, navigate, query }) {
         if (!song) return;
         const confirmed = window.confirm(`删除《${song.title || '未命名歌曲'}》？\n\n歌词、学习进度和复习记录会一起删除，此操作无法撤销。`);
         if (!confirmed) return;
-        await libraryStore.deleteSong(song.id);
-        songs = await libraryStore.listSongs(currentSort);
-        render();
+        const release = context.criticalOperations?.acquire?.('song-delete') || (() => {});
+        try {
+          await libraryStore.deleteSong(song.id);
+          songs = await libraryStore.listSongs(currentSort);
+          render();
+        } finally {
+          release();
+        }
       });
     });
     element.querySelectorAll('[data-reimport-file]').forEach(input => {
       input.addEventListener('change', async event => {
         const file = event.target.files?.[0];
         if (!file) return;
+        const release = context.criticalOperations?.acquire?.('song-edit') || (() => {});
         try {
           await libraryStore.replaceSongLyrics(input.dataset.reimportFile, {
             rawLrc: await file.text(),
@@ -374,6 +414,8 @@ export async function createLibraryView({ context, navigate, query }) {
           render();
         } catch (error) {
           window.alert(error.message || '重新导入失败');
+        } finally {
+          release();
         }
       });
     });
@@ -396,6 +438,13 @@ export async function createLibraryView({ context, navigate, query }) {
 
   async function previewNeteaseSong(event) {
     event.preventDefault();
+    if (!online) {
+      importMessage = '当前离线，无法解析网易云链接；本地 LRC 导入仍可使用。';
+      importState = 'warning';
+      render();
+      return;
+    }
+    const release = context.criticalOperations?.acquire?.('netease-import') || (() => {});
     const data = new FormData(event.currentTarget);
     neteaseInput = String(data.get('input') || '').trim();
     neteasePreview = null;
@@ -423,12 +472,14 @@ export async function createLibraryView({ context, navigate, query }) {
     } finally {
       busy = false;
       activeImportController = null;
+      release();
       if (window.location.hash.startsWith('#/library')) render();
     }
   }
 
   async function importNeteasePreview() {
     if (!neteasePreview || busy) return;
+    const release = context.criticalOperations?.acquire?.('netease-import') || (() => {});
     setImportBusy('正在保存歌曲和学习卡…');
     try {
       const result = await libraryStore.importNeteasePreview(neteasePreview);
@@ -444,6 +495,7 @@ export async function createLibraryView({ context, navigate, query }) {
       importState = 'danger';
     } finally {
       busy = false;
+      release();
       if (window.location.hash.startsWith('#/library')) render();
     }
   }
@@ -456,20 +508,17 @@ export async function createLibraryView({ context, navigate, query }) {
     render();
   }
 
-  function applySearch() {
+  function getFilteredSongs() {
     const normalized = searchTerm.trim().toLocaleLowerCase();
-    let visibleCount = 0;
-    element.querySelectorAll('[data-song-row]').forEach(row => {
-      const visible = !normalized || (row.dataset.searchable || '').includes(normalized);
-      row.classList.toggle('hidden', !visible);
-      if (visible) visibleCount += 1;
-    });
-    element.querySelector('#search-empty')?.classList.toggle('hidden', visibleCount > 0);
+    if (!normalized) return songs;
+    return songs.filter(song =>
+      `${song.title || ''} ${song.artist || ''}`.toLocaleLowerCase().includes(normalized));
   }
 
   async function importFiles(event) {
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
+    const release = context.criticalOperations?.acquire?.('local-import') || (() => {});
     activeImportController = new AbortController();
     setImportBusy(`正在读取并导入 ${files.length} 个文件…`);
     try {
@@ -502,12 +551,14 @@ export async function createLibraryView({ context, navigate, query }) {
     } finally {
       busy = false;
       activeImportController = null;
+      release();
       if (window.location.hash.startsWith('#/library')) render();
     }
   }
 
   async function importPastedLrc(event) {
     event.preventDefault();
+    const release = context.criticalOperations?.acquire?.('local-import') || (() => {});
     const data = new FormData(event.currentTarget);
     setImportBusy('正在分析并导入歌词…');
     try {
@@ -528,12 +579,14 @@ export async function createLibraryView({ context, navigate, query }) {
       importState = 'danger';
     } finally {
       busy = false;
+      release();
       if (window.location.hash.startsWith('#/library')) render();
     }
   }
 
   async function importPlaylist(event) {
     event.preventDefault();
+    const release = context.criticalOperations?.acquire?.('local-import') || (() => {});
     const data = new FormData(event.currentTarget);
     setImportBusy('正在导入文本歌单…');
     try {
@@ -557,6 +610,7 @@ export async function createLibraryView({ context, navigate, query }) {
       lastImportDetails = [{ title: '文本歌单', message: importMessage }];
     } finally {
       busy = false;
+      release();
       if (window.location.hash.startsWith('#/library')) render();
     }
   }
@@ -570,6 +624,7 @@ export async function createLibraryView({ context, navigate, query }) {
 
   async function retryImportJob() {
     if (!lastImportJob?.id) return;
+    const release = context.criticalOperations?.acquire?.('local-import') || (() => {});
     setImportBusy('正在重试失败项…');
     try {
       const result = await libraryStore.retryImportJob(lastImportJob.id);
@@ -588,16 +643,13 @@ export async function createLibraryView({ context, navigate, query }) {
       importState = 'danger';
     } finally {
       busy = false;
+      release();
       if (window.location.hash.startsWith('#/library')) render();
     }
   }
 
   function openSong(songId) {
-    const song = songs.find(item => item.id === songId);
-    navigate('study', {
-      songId,
-      cardId: song?.progressSummary?.currentCardId || '',
-    });
+    navigate('study', { songId });
   }
 
   function openImportedSong(song) {

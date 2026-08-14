@@ -55,6 +55,10 @@ test('data backup: 完整导出后可清空并恢复', async () => {
   const { data, repositories } = createMemoryRepositories();
   const service = createDataBackupService(repositories);
   const backup = await service.exportData();
+  assert.equal(backup.schemaVersion, 2);
+  assert.ok(Array.isArray(backup.data.songLyrics));
+  assert.ok(Array.isArray(backup.data.cards));
+  assert.ok(Array.isArray(backup.data.learningUnits));
   assert.deepEqual(service.validateBackup(backup), { songs: 1, playlists: 1, progress: 1 });
 
   await service.clearAll();
@@ -72,4 +76,55 @@ test('data backup: 拒绝未知版本与非法文件', () => {
   const service = createDataBackupService(repositories);
   assert.throws(() => service.validateBackup({}), /不是 ANISON/);
   assert.throws(() => service.validateBackup({ app: 'ANISON', schemaVersion: 99, data: {} }), /不支持备份版本/);
+});
+
+test('data backup: v1 重复歌词转换为共享学习单元', async () => {
+  let restored = null;
+  const repositories = {
+    data: {
+      async replaceAll(data) {
+        restored = data;
+      },
+    },
+  };
+  const service = createDataBackupService(repositories);
+  const learned = {
+    state: 'mastered',
+    favorite: true,
+    reviewCount: 3,
+    studiedAt: 100,
+    lastReviewedAt: 200,
+  };
+  const backup = {
+    app: 'ANISON',
+    schemaVersion: 1,
+    data: {
+      songs: [{
+        id: 'duplicate-song',
+        title: '重复歌词',
+        rawLrc: '[00:01.00]君と歌う\n[00:02.00]君と歌う',
+        cards: [
+          { id: 'card-1', lyric: '君と歌う', translation: '与你歌唱', learning: learned },
+          { id: 'card-2', lyric: '君と歌う', translation: '与你歌唱' },
+        ],
+      }],
+      playlists: [],
+      importJobs: [],
+      progress: [{
+        songId: 'duplicate-song',
+        cardStates: { 'card-1': learned },
+      }],
+    },
+    settings: {},
+  };
+
+  await service.importData(backup);
+
+  assert.equal(restored.songs.length, 1);
+  assert.equal(restored.songLyrics[0].rawLrc, backup.data.songs[0].rawLrc);
+  assert.equal(restored.cards.length, 2);
+  assert.equal(restored.learningUnits.length, 1);
+  assert.equal(restored.learningUnits[0].state, 'mastered');
+  assert.equal(restored.learningUnits[0].favoriteKey, 1);
+  assert.equal(restored.progress[0].studiedCount, 1);
 });
