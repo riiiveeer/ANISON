@@ -15,6 +15,8 @@
 
 PWA 的 Cache Storage 只保存 ANISON 的 HTML、JavaScript、CSS、manifest 和本地图标，不保存用户歌曲、歌词、学习进度、DeepSeek Key、AI 响应或网易云请求。应用更新和旧缓存清理不会删除 IndexedDB 或 localStorage；浏览器自身清除站点数据仍可能同时删除它们。
 
+IndexedDB v4 升级会在当前设备创建 `migrationArchive`，按歌曲保留一份迁移前的逻辑记录，供 beta 阶段验证迁移完整性；它不会上传、不会参与业务查询，也不写入日常导出备份，计划由未来 v5 清理。使用“清除站点数据”仍会连同该归档一起删除。
+
 ## 网易云歌词导入
 
 用户粘贴的公开单曲链接、分享文本或歌曲 ID 会发送到运行 ANISON 的 Node 服务。服务会提取歌曲 ID并请求公开歌曲信息和歌词轨道。

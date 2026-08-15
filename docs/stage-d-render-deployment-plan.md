@@ -70,7 +70,7 @@ flowchart LR
     R -->|"HTTPS 同源"| U["浏览器 / 已安装 PWA"]
     R -->|"受限请求"| N["网易云公开接口"]
     R -->|"用户 Bearer Key"| D["DeepSeek API"]
-    U --> I["设备 IndexedDB v3"]
+    U --> I["设备 IndexedDB v4 聚合/稀疏存储"]
     U --> S["Service Worker / Cache Storage"]
 ```
 
@@ -158,9 +158,9 @@ services:
 
 现有 CI 三组作业均为发布必需：
 
-- `test-and-build`：`npm ci`、133+ Node 测试、生产构建、依赖审计。
-- `browser-e2e-and-performance`：核心流程和 1000 首/80000 卡性能预算。
-- `production-pwa`：生产 Service Worker、离线重启、waiting worker 和 IndexedDB 保留。
+- `test-and-build`：`npm ci`、147+ Node 测试、生产构建、依赖审计。
+- `browser-e2e-and-performance`：核心流程、两项 v4 迁移、聚合恢复和 1000 首/80000 逻辑卡页面预算。
+- `production-pwa`：生产 Service Worker、离线重启、v3→v4、waiting worker、更新锁和 IndexedDB 保留。
 
 阶段 D 增加：
 
@@ -183,7 +183,7 @@ GitHub 仓库设置建议把三组 CI 设为 `main` 必需状态检查，并要�
 施工：
 
 - 记录用户已完成的临时 HTTPS 预验收，不把随机 Tunnel Origin 当作正式地址。
-- 核对版本、manifest、BUILD_ID、IndexedDB v3 和现有未提交工作树。
+- 核对版本、manifest、BUILD_ID、IndexedDB v4 和现有未提交工作树。
 - 运行 `npm ci`、`npm run check`、普通 E2E、PWA E2E 和性能门禁。
 - 检查仓库中没有 `.env`、Key、Beta 密码、歌词或个人备份。
 
@@ -231,6 +231,8 @@ GitHub 仓库设置建议把三组 CI 设为 `main` 必需状态检查，并要�
 - 连续两次生产构建的 `sw.js` SHA-256 均为 `D28FBA6F43E54780A221173227F449DEA8508269D35279E8C34F49FD7A0C1F87`。
 - D3：施工分支已推送并创建 PR #1；修复后的 Linux CI 仍需全绿，并让 `main` 三项必需检查实际生效。
 - PR #1 首次 CI 中 `test-and-build` 与 `production-pwa` 通过；Linux 大数据作业在恢复阶段超过 5 分钟超时。修复将逐条 Cursor 快照替换为每批 2000 条的 `getAll`/`getAllKeys` 原生分页，新增 4101 个复合主键跨批恢复测试，并把迁移与恢复指标分开输出；原 30 秒/10 秒预算不放宽。
+- PR #1 后续 CI 证明分页修复把恢复压入预算，但旧 v3 逐卡物理模型的 80,000 卡迁移仍耗时 217,499 ms。提交 `5a76193` 以 IndexedDB v4 取代该路径：每曲一条内容文档、默认状态不落盘、索引延后创建，并在单个 `versionchange` 事务内归档、写入和验证。
+- 2026-08-15 Windows 强制执行完整门禁：全默认迁移约 8.2 秒（80,000 逻辑单元、0 状态），10% 状态迁移约 13.3 秒（8,000 状态），聚合恢复约 6.2～6.6 秒；147/147 Node 测试和 v3→v4 PWA 更新用例通过。Linux CI 仍须在推送后给出正式发布证据。
 
 ### D4：创建 Render 服务（需要用户授权）
 
@@ -278,7 +280,7 @@ GitHub 仓库设置建议把三组 CI 设为 `main` 必需状态检查，并要�
 1. 在 canonical Origin 新建测试数据并导出备份。
 2. 记录歌曲数、学习进度、收藏、评分、版本和 BUILD_ID。
 3. 断网冷启动，验证所有本地功能和联网功能降级。
-4. 部署第二个不同 BUILD_ID；先“稍后”，再“立即更新”。
+4. 部署第二个不同且同样兼容 IndexedDB v4 的 BUILD_ID；先“稍后”，再“立即更新”。
 5. 在大型恢复/导入操作期间确认更新按钮被关键操作锁阻止。
 6. 更新后核对 IndexedDB 数据、备份和已显示讲解。
 7. WiFi 与移动网络各完成一次核心冒烟，记录中国大陆网络差异。
@@ -301,6 +303,7 @@ GitHub 仓库设置建议把三组 CI 设为 `main` 必需状态检查，并要�
 施工：
 
 1. 在 Render Deploys 选择前一个成功构建执行 Dashboard Rollback。
+   目标必须包含 IndexedDB v4 支持；禁止选择只会打开 v3 的部署。
 2. 确认回滚后 `/healthz`、版本/提交、首页和两条 API 边界正常。
 3. 确认 PWA 获取回滚 worker，缓存只清理 ANISON 两类缓存。
 4. 确认 IndexedDB、localStorage 和业务数据未删除。

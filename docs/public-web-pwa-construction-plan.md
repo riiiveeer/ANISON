@@ -545,7 +545,7 @@ Node 精确版本由根目录 `.node-version` 固定为 `24.14.1`；不在 Dashb
 
 详细施工批次、Blueprint 契约、固定 HTTPS 验收、CSP 收口、实机矩阵和回滚演练见 [阶段 D：Render 固定 HTTPS 部署、发布门禁与回滚施工方案](stage-d-render-deployment-plan.md)。
 
-状态：D0～D3 本地工程施工已完成，施工分支已推送并创建 PR #1；首次 Linux CI 暴露的大型恢复分页瓶颈已修复，等待三组 CI 复跑。`main` 必需检查和 Render 服务尚未配置。临时 Cloudflare Tunnel 仅作为阶段 C 预验收，固定 `onrender.com` Origin 的正式记录仍须在 D4～D8 完成。
+状态：D0～D3 本地工程施工已完成，施工分支已推送并创建 PR #1；Linux CI 先后暴露恢复分页和 v3 逐卡迁移瓶颈。当前工作树已升级为 IndexedDB v4 的聚合内容与稀疏状态模型，本地硬门禁满足原 30 秒/10 秒预算，等待形成第二个修复提交并推送复跑三组 CI。`main` 必需检查和 Render 服务尚未配置。临时 Cloudflare Tunnel 仅作为阶段 C 预验收，固定 `onrender.com` Origin 的正式记录仍须在 D4～D8 完成。
 
 交付：
 
@@ -574,13 +574,13 @@ Node 精确版本由根目录 `.node-version` 固定为 `24.14.1`；不在 Dashb
 - [x] 单元和集成测试通过。
 - [x] 生产构建通过。
 - [x] 浏览器核心 E2E 通过。
-- [x] 1000 首 / 80000 卡性能门禁通过（Windows 跳过 Linux 专属完整迁移 30 秒项，其余预算通过；Linux CI 仍执行硬门禁）。
+- [x] v4 的 1000 首 / 80000 逻辑卡门禁在本地通过：默认状态 0 条物理记录、10% 状态 8000 条、聚合恢复和页面预算均达标；Windows 默认跳过 Linux 专属完整迁移 30 秒项，Linux CI 仍执行硬门禁。
 - [x] `npm audit --audit-level=high` 通过。
 - [x] `/healthz` 通过。
 - [x] 网易云固定夹具烟雾测试通过。
 - [x] DeepSeek 假上游代理测试通过。
 - [ ] 移动端 HTTPS 页面无 Mixed Content。
-- [ ] 新版本读取旧 IndexedDB 和备份文件正常。
+- [x] 自动化验证 v2、完整/混合 v3 原子升级到 v4，备份 schema v3 往返并兼容导入 v1/v2。
 - [x] CHANGELOG、版本号和应用内显示一致。
 
 ## 19. 监控与运维
@@ -611,7 +611,7 @@ Beta 阶段至少观察：
 - 新旧版本使用不同缓存名称。
 - 回滚版本的 Service Worker 必须能删除未知的新缓存。
 - 不要在回滚中清空 IndexedDB。
-- 如果新版本进行了数据库迁移，必须保证旧版可读取，或在发布前明确禁止直接回滚并准备向前修复。
+- 阶段 D 只允许在兼容 IndexedDB v4 的部署之间回滚；禁止回滚到只会以版本 3 打开数据库的提交。没有兼容目标时必须向前修复。
 
 ### 20.3 上游接口故障
 

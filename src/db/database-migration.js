@@ -20,7 +20,9 @@ export function migrateDatabaseV4(database, transaction, {
     logicalLearningUnits: 0,
     persistedLearningStates: 0,
     durationMs: 0,
+    phaseDurations: {},
   };
+  let phaseStartedAt = startedAt;
   const sourceStores = new Set(Array.from(database.objectStoreNames));
   const songs = transaction.objectStore('songs');
   const progress = transaction.objectStore('progress');
@@ -31,11 +33,13 @@ export function migrateDatabaseV4(database, transaction, {
   const songIds = new Set();
 
   transaction.addEventListener('complete', () => {
+    finishPhase();
     report.phase = 'complete';
     report.durationMs = Math.round(now() - startedAt);
     notify(onProgress, report);
   });
   transaction.addEventListener('abort', () => {
+    finishPhase();
     report.phase = 'failed';
     report.durationMs = Math.round(now() - startedAt);
     notify(onProgress, report);
@@ -74,7 +78,7 @@ export function migrateDatabaseV4(database, transaction, {
           archivedAt: Date.now(),
         });
 
-        report.phase = 'write';
+        setPhase('write');
         report.completedSongs += 1;
         report.logicalCards += parts.song.cardCount;
         report.logicalLearningUnits += parts.song.learningUnitCount;
@@ -101,7 +105,7 @@ export function migrateDatabaseV4(database, transaction, {
   }
 
   function buildIndexesAndVerify() {
-    report.phase = 'index';
+    setPhase('index');
     notify(onProgress, report);
     createLearningStateIndexes(learningStates);
 
@@ -119,7 +123,7 @@ export function migrateDatabaseV4(database, transaction, {
   }
 
   function verifyAndFinish(counts) {
-    report.phase = 'verify';
+    setPhase('verify');
     notify(onProgress, report);
     const expectedSongs = report.totalSongs;
     const valid = counts.songs === expectedSongs
@@ -148,6 +152,19 @@ export function migrateDatabaseV4(database, transaction, {
       archiveAvailable: true,
       updatedAt: Date.now(),
     });
+  }
+
+  function setPhase(phase) {
+    if (report.phase === phase) return;
+    finishPhase();
+    report.phase = phase;
+    phaseStartedAt = now();
+  }
+
+  function finishPhase() {
+    const elapsed = Math.max(0, Math.round(now() - phaseStartedAt));
+    report.phaseDurations[report.phase] =
+      Number(report.phaseDurations[report.phase] || 0) + elapsed;
   }
 
   return report;

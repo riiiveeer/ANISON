@@ -83,6 +83,10 @@ export async function bootstrapApp() {
         );
       },
     });
+    window.__ANISON_UPGRADE_REPORT__ = Object.freeze({
+      ...dbContext.upgradeReport,
+      phaseDurations: Object.freeze({ ...(dbContext.upgradeReport?.phaseDurations || {}) }),
+    });
     await recoverInterruptedRestore(dbContext, {
       onProgress({ storeName, completed, total }) {
         showStatus(

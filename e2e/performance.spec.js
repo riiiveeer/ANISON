@@ -3,7 +3,14 @@ import { test, expect } from '@playwright/test';
 test('@perf 1000 首/80000 卡保持分页和索引查询预算', async ({ page }) => {
   test.setTimeout(180000);
   await page.goto('/#/home');
-  await seedNormalizedLibrary(page, 1000, 80);
+  const fixtureCounts = await seedNormalizedLibrary(page, 1000, 80);
+  expect(fixtureCounts).toEqual({
+    songs: 1000,
+    songContents: 1000,
+    logicalCards: 80000,
+    logicalLearningUnits: 80000,
+    learningStates: 8000,
+  });
   await page.reload();
   await expect(page.locator('.page-home')).toBeVisible();
 
@@ -59,7 +66,7 @@ test('@perf 1000 首/80000 卡保持分页和索引查询预算', async ({ page 
 });
 
 async function seedNormalizedLibrary(page, songCount, cardsPerSong) {
-  await page.evaluate(async ({ songCount, cardsPerSong }) => {
+  return page.evaluate(async ({ songCount, cardsPerSong }) => {
     const request = value => new Promise((resolve, reject) => {
       value.onsuccess = () => resolve(value.result);
       value.onerror = () => reject(value.error);
@@ -70,14 +77,14 @@ async function seedNormalizedLibrary(page, songCount, cardsPerSong) {
       transaction.onabort = () => reject(transaction.error);
     });
     const database = await new Promise((resolve, reject) => {
-      const open = indexedDB.open('anison-study-db', 3);
+      const open = indexedDB.open('anison-study-db', 4);
       open.onsuccess = () => resolve(open.result);
       open.onerror = () => reject(open.error);
     });
     const now = Date.now();
     for (let songOffset = 0; songOffset < songCount; songOffset += 100) {
       const transaction = database.transaction(
-        ['songs', 'songLyrics', 'cards', 'learningUnits', 'progress'],
+        ['songs', 'songContents', 'learningStates', 'progress'],
         'readwrite',
       );
       for (let index = songOffset; index < Math.min(songCount, songOffset + 100); index += 1) {
@@ -97,33 +104,28 @@ async function seedNormalizedLibrary(page, songCount, cardsPerSong) {
           lastStudiedAt: now - index,
           cardCount: cardsPerSong,
           learningUnitCount: cardsPerSong,
-          storageVersion: 3,
+          storageVersion: 4,
           fileNameKey: `${songId}.lrc`,
           titleArtistKey: `压力歌曲 ${String(index).padStart(4, '0')}\u0000歌手 ${index % 50}`,
           sourceKey: '',
-        });
-        transaction.objectStore('songLyrics').put({
-          songId,
-          rawLrc: '[00:01.00]テスト',
-          parsedVersion: 1,
         });
         transaction.objectStore('progress').put({
           songId,
           currentCardId: `${songId}-c0`,
           totalUnits: cardsPerSong,
-          studiedCount: 1,
+          studiedCount: Math.floor(cardsPerSong * 0.1),
           masteredCount: 0,
           fuzzyCount: 0,
           favoriteCount: 0,
-          completionRate: 1 / cardsPerSong,
+          completionRate: 0.1,
           lastStudiedAt: now - index,
-          storageVersion: 3,
+          storageVersion: 4,
         });
+        const cards = [];
         for (let cardIndex = 0; cardIndex < cardsPerSong; cardIndex += 1) {
           const cardId = `${songId}-c${cardIndex}`;
           const unitId = `target_${index}_${cardIndex}`;
-          transaction.objectStore('cards').put({
-            songId,
+          cards.push({
             id: cardId,
             timestamp: cardIndex * 1000,
             timeStr: '00:01.00',
@@ -139,8 +141,8 @@ async function seedNormalizedLibrary(page, songCount, cardsPerSong) {
             occurrenceIndex: 1,
             occurrenceCount: 1,
           });
-          if (cardIndex === 0) {
-            transaction.objectStore('learningUnits').put({
+          if (cardIndex < Math.floor(cardsPerSong * 0.1)) {
+            transaction.objectStore('learningStates').put({
               key: `${songId}\u0000${unitId}`,
               songId,
               unitId,
@@ -149,7 +151,7 @@ async function seedNormalizedLibrary(page, songCount, cardsPerSong) {
               favoriteKey: 0,
               reviewableKey: 1,
               historyKey: 1,
-              reviewCount: 0,
+              reviewCount: 1,
               lapseCount: 0,
               studiedAt: now - 1000,
               lastReviewedAt: 0,
@@ -158,10 +160,31 @@ async function seedNormalizedLibrary(page, songCount, cardsPerSong) {
             });
           }
         }
+        transaction.objectStore('songContents').put({
+          songId,
+          rawLrc: '[00:01.00]テスト',
+          parsedVersion: 1,
+          cards,
+          storageVersion: 4,
+        });
       }
       await transactionDone(transaction);
     }
-    await request(database.transaction('songs').objectStore('songs').count());
+    const contents = await request(
+      database.transaction('songContents').objectStore('songContents').getAll(),
+    );
+    const counts = {
+      songs: await request(database.transaction('songs').objectStore('songs').count()),
+      songContents: contents.length,
+      logicalCards: contents.reduce((sum, item) => sum + item.cards.length, 0),
+      logicalLearningUnits: contents.reduce((sum, item) => sum + new Set(
+        item.cards.map(card => card.learningUnitId),
+      ).size, 0),
+      learningStates: await request(
+        database.transaction('learningStates').objectStore('learningStates').count(),
+      ),
+    };
     database.close();
+    return counts;
   }, { songCount, cardsPerSong });
 }

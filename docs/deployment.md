@@ -176,16 +176,19 @@ API 只接受精确同源浏览器请求，并要求前端自动发送 `X-ANISON
 ## 数据兼容原则
 
 - 发布新版不得主动清空 IndexedDB。
-- 数据结构升级必须提供向前迁移。
+- 首个 Render 生产数据库版本固定为 IndexedDB v4；v2、完整 v3 和部分迁移 v3 都由单个 `versionchange` 事务原子升级，失败时旧数据库保持可重新打开。
+- v4 使用歌曲摘要、单曲聚合内容和稀疏学习状态；默认 `new` 状态不占物理记录。
 - 破坏性迁移前要求用户导出备份。
-- 新版读取旧备份时应先校验 `schemaVersion` 并预览覆盖范围。
+- 公共导出格式为 `schemaVersion: 3`，新版继续读取备份 v1/v2；恢复前完整校验重复键、孤立引用和统计清单。
+- `migrationArchive` 保存每首歌迁移前的逻辑记录，仅用于 beta 迁移证据，不参与业务查询或日常备份，并保留到未来 v5 再清理。
 
 ## PWA 故障与回滚
 
 1. 在 Render Deploys 明确选择目标成功部署，不使用模糊的“上一版”判断。
-2. 回滚时保持 `/sw.js` 和 manifest `id: "/"` 不变，让已安装客户端能够取得恢复 worker。
-3. 回滚 worker 只能清理 `anison-shell-`、`anison-runtime-` 缓存，不得删除 IndexedDB 或 localStorage。
-4. 若缓存逻辑本身故障，发布不拦截 fetch 的 pass-through worker，激活后通知客户端刷新。
-5. 回滚后运行部署验证器，并手工验证离线 App Shell、两条真实 API 边界和 IndexedDB 数据；Beta 401 不得被离线 HTML 掩盖。
-6. Render Dashboard Rollback 会暂停 Auto Deploy；确认故障被隔离后，人工部署最新已验证提交并恢复 `checksPass`。
-7. 域名变化前先从旧 Origin 导出备份，再在新 Origin 恢复；安装 PWA 不会迁移 Origin 数据。
+2. 回滚目标和当前部署都必须是兼容 IndexedDB v4 的构建；禁止回滚到只会以版本 3 打开数据库的提交。若没有兼容目标，只能向前修复。
+3. 回滚时保持 `/sw.js` 和 manifest `id: "/"` 不变，让已安装客户端能够取得恢复 worker。
+4. 回滚 worker 只能清理 `anison-shell-`、`anison-runtime-` 缓存，不得删除 IndexedDB、`migrationArchive` 或 localStorage。
+5. 若缓存逻辑本身故障，发布不拦截 fetch 的 pass-through worker，激活后通知客户端刷新。
+6. 回滚后运行部署验证器，并手工验证离线 App Shell、两条真实 API 边界和 IndexedDB v4 数据；Beta 401 不得被离线 HTML 掩盖。
+7. Render Dashboard Rollback 会暂停 Auto Deploy；确认故障被隔离后，人工部署最新已验证提交并恢复 `checksPass`。
+8. 域名变化前先从旧 Origin 导出备份，再在新 Origin 恢复；安装 PWA 不会迁移 Origin 数据。

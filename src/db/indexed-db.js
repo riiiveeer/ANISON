@@ -190,6 +190,7 @@ function createEmptyUpgradeReport(version) {
     logicalLearningUnits: 0,
     persistedLearningStates: 0,
     durationMs: 0,
+    phaseDurations: {},
   };
 }
 
