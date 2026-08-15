@@ -47,6 +47,7 @@ test('explainLyrics: 应发送受支持的 V4 模型并关闭思考模式', asyn
   const previousStorage = globalThis.localStorage;
   const previousFetch = globalThis.fetch;
   let requestBody = null;
+  let requestHeaders = null;
   globalThis.localStorage = {
     getItem(key) { return storage.get(key) || null; },
     setItem(key, value) { storage.set(key, String(value)); },
@@ -54,6 +55,7 @@ test('explainLyrics: 应发送受支持的 V4 模型并关闭思考模式', asyn
   };
   globalThis.fetch = async (_url, options) => {
     requestBody = JSON.parse(options.body);
+    requestHeaders = options.headers;
     return {
       ok: true,
       async json() {
@@ -67,6 +69,7 @@ test('explainLyrics: 应发送受支持的 V4 模型并关闭思考模式', asyn
     assert.equal(result, '测试讲解');
     assert.equal(requestBody.model, 'deepseek-v4-flash');
     assert.deepEqual(requestBody.thinking, { type: 'disabled' });
+    assert.equal(requestHeaders['X-ANISON-Request'], '1');
   } finally {
     globalThis.localStorage = previousStorage;
     globalThis.fetch = previousFetch;
@@ -78,4 +81,26 @@ test('API 错误解析: 应提取结构化错误消息', () => {
     __testables__.parseApiErrorMessage('{"error":{"message":"invalid model"}}'),
     'invalid model',
   );
+});
+
+test('explainLyrics: 明确离线时不发起请求并返回 OFFLINE', async () => {
+  const previousStorage = globalThis.localStorage;
+  let fetchCalls = 0;
+  globalThis.localStorage = {
+    getItem() { return null; },
+    setItem() {},
+    removeItem() {},
+  };
+  try {
+    await assert.rejects(
+      explainLyrics('離線テスト', '', '', '', 'test-key', '', {
+        isOnline: () => false,
+        fetchImpl: async () => { fetchCalls += 1; },
+      }),
+      error => error.code === 'OFFLINE' && error.retryable,
+    );
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.localStorage = previousStorage;
+  }
 });

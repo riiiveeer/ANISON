@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">ANISON</title>
+  <desc id="desc">红色圆角方块中的米白色音乐音符</desc>
+  <rect width="512" height="512" rx="112" fill="#c44f4f"/>
+  <path fill="#faf9f6" d="M226 132c0-13 9-25 22-28l142-34c18-4 35 9 35 28v222c0 42-34 76-76 76s-76-34-76-76 34-76 76-76c10 0 20 2 29 6V157l-105 25v181c0 42-34 76-76 76s-76-34-76-76 34-76 76-76c10 0 20 2 29 6V132Z"/>
+</svg>

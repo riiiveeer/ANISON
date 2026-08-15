@@ -23,3 +23,20 @@
 - 不要把 DeepSeek Key 写入源码、测试夹具、`.env`、Issue、截图或日志。
 - 一旦密钥误提交，应立即在服务提供方撤销并重新生成；仅从 Git 历史删除并不足以恢复安全。
 - 公网运营者不得把共享生产密钥打包进前端资源。
+- ANISON 服务端不会读取 DeepSeek Key 环境变量；每次 AI 请求只转发当前用户的 Bearer Key，且不得保存、缓存或记录该请求头。
+
+## 公网安全配置
+
+- `BETA_AUTH_USERNAME` 与 `BETA_AUTH_PASSWORD` 必须同时配置；只配置一项时服务会拒绝启动。首次 Basic 验证成功后换取 12 小时的 HttpOnly、SameSite=Strict 会话 Cookie，服务重启后会话失效。
+- `/healthz` 始终免鉴权；其余页面、静态资源和 API 在门禁启用时均受保护。
+- 两条浏览器 POST API 同时校验精确同源 `Origin` 与 `X-ANISON-Request: 1`，不开放 CORS。
+- 生产服务只信任一层反向代理。部署平台必须覆盖客户端提供的 `X-Forwarded-*` 头，避免 IP 限流被伪造。
+- CSP 默认使用 Report-Only；确认生产报告没有正常流程违规后，设置 `CSP_MODE=enforce` 强制执行。
+- Beta 限流、缓存和会话均在单进程内存中，服务重启会清空；它们不替代部署平台的 HTTPS、边缘限流和监控。
+- Service Worker 只缓存构建清单内的同源 GET 静态资源；`/api/*`、Authorization、非 GET、第三方封面和未知路径不进入 Cache Storage。
+- Worker 更新不自动 `skipWaiting`。用户确认前继续运行旧版本，导入、编辑和恢复期间禁止触发刷新；缓存清理只能删除 `anison-shell-` 和 `anison-runtime-` 前缀。
+- `sw.js` 必须保持 `no-cache` 和根 scope。紧急恢复 worker 不得调用 `indexedDB.deleteDatabase`、`localStorage.clear()` 或业务清空接口。
+- 阶段 D 的生产部署与 Dashboard Rollback 必须都兼容 IndexedDB v4；不得把已升级设备回滚到只会以 v3 打开数据库的构建。`migrationArchive` 保留到 v5，回滚和日常备份都不得覆盖或删除它。
+- Render 部署必须以根目录 `render.yaml` 为契约，Beta 凭据使用 `sync: false` 并由运营者在 Dashboard 现场输入；Blueprint 不声明 `PORT`、服务端 DeepSeek Key、数据库或磁盘。
+- 固定 HTTPS 部署应使用 `npm run verify:deployment` 验证 401、缓存、MIME、安全头、版本/提交/BUILD_ID 和 API JSON 边界。凭据只通过临时环境变量提供，完成后立即清除。
+- CSP 从 Report-Only 切换为 Enforce、生产回滚和恢复 Auto Deploy 都是显式运维变更，必须记录目标部署和验证结果。

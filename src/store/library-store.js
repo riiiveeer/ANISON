@@ -12,9 +12,11 @@ import { buildReviewItems, createTodayOverview, filterReviewItems, learningState
 import { createPlaylistImporter } from '../engine/playlist-importer.js';
 import { createLyricProviderRegistry } from '../engine/lyric-provider.js';
 
-export function createLibraryStore(repositories) {
+export function createLibraryStore(repositories, options = {}) {
   const playlistImporter = createPlaylistImporter();
-  const lyricProviderRegistry = createLyricProviderRegistry();
+  const lyricProviderRegistry = createLyricProviderRegistry({
+    isOnline: options.isOnline || (() => options.networkStatus?.getState?.().online !== false),
+  });
 
   return {
     async importSingleSong({ rawLrc, fileName = '', title = '', artist = '', source = 'manual', sourceSongId = '' }) {
@@ -238,25 +240,26 @@ export function createLibraryStore(repositories) {
     },
 
     async listSongs(sortBy = 'recent-imported') {
-      const songs = await repositories.songs.listSongs();
-      const progressList = await repositories.progress?.listRecentProgress?.(1000) || [];
+      const songs = await (repositories.songs.listSongSummaries?.()
+        || repositories.songs.listSongs());
+      if (songs.every(song => song.progressSummary)) return sortSongs(songs, sortBy);
+      const progressList = await repositories.progress?.listAllProgress?.()
+        || await repositories.progress?.listRecentProgress?.(1000)
+        || [];
       const progressMap = new Map(progressList.map(progress => [progress.songId, progress]));
-
       return sortSongs(songs, sortBy).map(song => {
         const progress = progressMap.get(song.id);
-        return {
-          ...song,
-          progress,
-          progressSummary: createProgressSummary(song, progress),
-        };
+        return { ...song, progress, progressSummary: createProgressSummary(song, progress) };
       });
     },
 
     async getSongById(songId) {
       const song = await repositories.songs.getSongById(songId);
       if (!song) return null;
-      const progress = await repositories.progress?.getProgressBySongId?.(songId) || null;
-      const hydratedSong = hydrateSongCards(song, progress);
+      const progress = song.progress
+        || await repositories.progress?.getProgressBySongId?.(songId)
+        || null;
+      const hydratedSong = Number(song.storageVersion) >= 3 ? song : hydrateSongCards(song, progress);
       return {
         ...hydratedSong,
         progress,
@@ -265,6 +268,11 @@ export function createLibraryStore(repositories) {
     },
 
     async updateSongMeta(songId, { title = '', artist = '' }) {
+      if (repositories.songs.updateSongMeta) {
+        const updated = await repositories.songs.updateSongMeta(songId, { title, artist });
+        if (!updated) throw new Error('未找到要编辑的歌曲');
+        return this.getSongById(songId);
+      }
       const song = await repositories.songs.getSongById(songId);
       if (!song) throw new Error('未找到要编辑的歌曲');
       const nextSong = {
@@ -287,10 +295,18 @@ export function createLibraryStore(repositories) {
         source: current.source,
         sourceSongId: current.sourceSongId,
       });
+      const learningByCardId = new Map(
+        (current.cards || []).map(card => [card.id, card.learning]),
+      );
       const nextSong = {
         ...parsed,
         id: current.id,
-        cards: parsed.cards.map(card => ({ ...card, songId: current.id })),
+        cards: parsed.cards.map(card => ({
+          ...card,
+          songId: current.id,
+          learning: learningByCardId.get(card.id) || card.learning,
+        })),
+        progress: current.progress,
         createdAt: current.createdAt,
         lastStudiedAt: current.lastStudiedAt || 0,
         updatedAt: Date.now(),
@@ -300,14 +316,21 @@ export function createLibraryStore(repositories) {
     },
 
     async deleteSong(songId) {
-      await repositories.progress?.deleteProgress?.(songId);
-      await repositories.playlists?.removeSongFromPlaylists?.(songId);
+      if (!repositories.songs.supportsAtomicCascade) {
+        await repositories.progress?.deleteProgress?.(songId);
+        await repositories.playlists?.removeSongFromPlaylists?.(songId);
+      }
       await repositories.songs.deleteSong(songId);
     },
 
     async touchStudyEntry(songId, currentCardId = '') {
       const timestamp = Date.now();
-      await repositories.songs.touchSongStudyTime(songId, timestamp);
+      const atomicProgress = await repositories.songs.touchSongStudyTime(
+        songId,
+        timestamp,
+        currentCardId,
+      );
+      if (atomicProgress) return atomicProgress;
 
       if (!repositories.progress?.getProgressBySongId || !repositories.progress?.saveProgress) {
         return null;
@@ -327,6 +350,9 @@ export function createLibraryStore(repositories) {
     },
 
     async updateCardLearning(songId, cardId, patch = {}) {
+      if (repositories.learning?.updateLearningUnit) {
+        return repositories.learning.updateLearningUnit(songId, cardId, patch);
+      }
       const song = await repositories.songs.getSongById(songId);
       if (!song) return null;
 
@@ -395,6 +421,15 @@ export function createLibraryStore(repositories) {
       const filter = normalized.filter || 'due';
       const dueBefore = normalized.dueBefore || Date.now();
       const songId = normalized.songId || '';
+      if (repositories.learning?.listReviewPage && !songId) {
+        const page = await repositories.learning.listReviewPage({
+          filter,
+          dueBefore,
+          limit: normalized.limit || 50,
+          cursor: normalized.cursor || null,
+        });
+        return page.items;
+      }
       const songs = await repositories.songs.listSongs();
       const progressList = await repositories.progress?.listAllProgress?.()
         || await repositories.progress?.listRecentProgress?.(1000)
@@ -407,15 +442,63 @@ export function createLibraryStore(repositories) {
     },
 
     async getHomeDashboard() {
+      if (repositories.songs.getHomeOverview && repositories.learning?.getReviewOverview) {
+        const [songOverview, reviewOverview] = await Promise.all([
+          repositories.songs.getHomeOverview(3),
+          repositories.learning.getReviewOverview(Date.now()),
+        ]);
+        const continueSong = songOverview.recentSongs[0] || null;
+        return {
+          songCount: songOverview.songCount,
+          studiedSongs: songOverview.studiedSongs,
+          reviewCount: reviewOverview.dueCount,
+          continueSong,
+          recentSongs: songOverview.recentSongs,
+          reviewItems: [],
+          dueReviewItems: [],
+        };
+      }
       const songs = await this.listSongs('recent-studied');
-      const dueReviewItems = await this.listReviewCards({ filter: 'due', dueBefore: Date.now() });
+      const reviewOverview = repositories.learning?.getReviewOverview
+        ? await repositories.learning.getReviewOverview(Date.now())
+        : null;
+      const dueReviewItems = reviewOverview
+        ? reviewOverview.historyItems.slice(0, 5)
+        : await this.listReviewCards({ filter: 'due', dueBefore: Date.now(), limit: 5 });
       const overview = createTodayOverview(songs, dueReviewItems);
       return {
         ...overview,
+        reviewCount: reviewOverview?.dueCount ?? overview.reviewCount,
         recentSongs: songs.slice(0, 3),
         reviewItems: dueReviewItems.slice(0, 5),
         dueReviewItems: dueReviewItems.slice(0, 5),
       };
+    },
+
+    async getReviewOverview(now = Date.now()) {
+      if (repositories.learning?.getReviewOverview) {
+        return repositories.learning.getReviewOverview(now);
+      }
+      const [dueItems, historyItems] = await Promise.all([
+        this.listReviewCards({ filter: 'due', dueBefore: now }),
+        this.listReviewCards({ filter: 'all' }),
+      ]);
+      return { dueCount: dueItems.length, historyItems: historyItems.slice(0, 20) };
+    },
+
+    async listReviewPage(options = {}) {
+      if (repositories.learning?.listReviewPage) {
+        return repositories.learning.listReviewPage(options);
+      }
+      const items = await this.listReviewCards(options);
+      return { items: items.slice(0, options.limit || 50), nextCursor: null };
+    },
+
+    async countReviewItems(options = {}) {
+      if (repositories.learning?.countReviewItems) {
+        return repositories.learning.countReviewItems(options);
+      }
+      return (await this.listReviewCards(options)).length;
     },
 
     async previewNeteaseSong(input, options = {}) {

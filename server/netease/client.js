@@ -36,53 +36,63 @@ export class NeteaseUpstreamError extends Error {
 
 export function createNeteaseClient(options = {}) {
   const fetchImpl = options.fetchImpl || globalThis.fetch;
-  const timeoutMs = options.timeoutMs || 10000;
+  const timeoutMs = options.timeoutMs || 15000;
 
   return {
-    async getSongPreview(songId) {
+    async getSongPreview(songId, requestOptions = {}) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      timeout.unref?.();
+      const signal = requestOptions.signal
+        ? AbortSignal.any([controller.signal, requestOptions.signal])
+        : controller.signal;
       let detailPayload;
       let lyricPayload;
       try {
-        [detailPayload, lyricPayload] = await Promise.all([
-          fetchPublicDetail(fetchImpl, songId, timeoutMs),
-          fetchPublicLyrics(fetchImpl, songId, timeoutMs),
-        ]);
-        validatePublicPayloads(detailPayload, lyricPayload);
-      } catch (publicError) {
-        if (publicError?.code === 'UPSTREAM_RATE_LIMITED') throw publicError;
-        [detailPayload, lyricPayload] = await Promise.all([
-          fetchWeapiDetail(fetchImpl, songId, timeoutMs),
-          fetchWeapiLyrics(fetchImpl, songId, timeoutMs),
-        ]);
-      }
+        try {
+          [detailPayload, lyricPayload] = await Promise.all([
+            fetchPublicDetail(fetchImpl, songId, signal),
+            fetchPublicLyrics(fetchImpl, songId, signal),
+          ]);
+          validatePublicPayloads(detailPayload, lyricPayload);
+        } catch (publicError) {
+          if (['UPSTREAM_RATE_LIMITED', 'UPSTREAM_TIMEOUT'].includes(publicError?.code)) throw publicError;
+          [detailPayload, lyricPayload] = await Promise.all([
+            fetchWeapiDetail(fetchImpl, songId, signal),
+            fetchWeapiLyrics(fetchImpl, songId, signal),
+          ]);
+        }
 
-      return normalizePreview(songId, detailPayload, lyricPayload);
+        return normalizePreview(songId, detailPayload, lyricPayload);
+      } finally {
+        clearTimeout(timeout);
+      }
     },
   };
 }
 
-async function fetchPublicDetail(fetchImpl, songId, timeoutMs) {
+async function fetchPublicDetail(fetchImpl, songId, signal) {
   const url = new URL(PUBLIC_DETAIL_URL);
   url.searchParams.set('id', songId);
   url.searchParams.set('ids', JSON.stringify([songId]));
-  return requestJsonWithRetry(fetchImpl, url, { timeoutMs });
+  return requestJsonWithRetry(fetchImpl, url, { signal });
 }
 
-async function fetchPublicLyrics(fetchImpl, songId, timeoutMs) {
+async function fetchPublicLyrics(fetchImpl, songId, signal) {
   const url = new URL(PUBLIC_LYRIC_URL);
   url.searchParams.set('id', songId);
   for (const key of ['lv', 'tv', 'rv', 'kv', 'yv', 'yrv']) url.searchParams.set(key, '-1');
-  return requestJsonWithRetry(fetchImpl, url, { timeoutMs });
+  return requestJsonWithRetry(fetchImpl, url, { signal });
 }
 
-async function fetchWeapiDetail(fetchImpl, songId, timeoutMs) {
+async function fetchWeapiDetail(fetchImpl, songId, signal) {
   return requestWeapi(fetchImpl, WEAPI_DETAIL_URL, {
     c: JSON.stringify([{ id: Number(songId) }]),
     ids: JSON.stringify([Number(songId)]),
-  }, timeoutMs);
+  }, signal);
 }
 
-async function fetchWeapiLyrics(fetchImpl, songId, timeoutMs) {
+async function fetchWeapiLyrics(fetchImpl, songId, signal) {
   return requestWeapi(fetchImpl, WEAPI_LYRIC_URL, {
     id: songId,
     os: 'pc',
@@ -92,13 +102,13 @@ async function fetchWeapiLyrics(fetchImpl, songId, timeoutMs) {
     rv: -1,
     yv: -1,
     yrv: -1,
-  }, timeoutMs);
+  }, signal);
 }
 
-async function requestWeapi(fetchImpl, url, payload, timeoutMs) {
+async function requestWeapi(fetchImpl, url, payload, signal) {
   const encrypted = encryptWeapiPayload(payload);
   return requestJsonWithRetry(fetchImpl, url, {
-    timeoutMs,
+    signal,
     method: 'POST',
     headers: {
       ...REQUEST_HEADERS,
@@ -117,22 +127,20 @@ async function requestJsonWithRetry(fetchImpl, url, options = {}) {
     } catch (error) {
       lastError = error;
       if (!error?.retryable || attempt > 0) throw error;
-      await new Promise(resolve => setTimeout(resolve, 250));
+      await waitForRetry(250, options.signal);
     }
   }
   throw lastError;
 }
 
 async function requestJson(fetchImpl, url, options) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs || 10000);
   try {
     const response = await fetchImpl(url, {
       method: options.method || 'GET',
       headers: options.headers || REQUEST_HEADERS,
       body: options.body,
       redirect: 'error',
-      signal: controller.signal,
+      signal: options.signal,
     });
 
     if (response.status === 429) {
@@ -160,9 +168,25 @@ async function requestJson(fetchImpl, url, options) {
     }
     if (error instanceof NeteaseUpstreamError) throw error;
     throw new NeteaseUpstreamError('UPSTREAM_INVALID_RESPONSE', '连接网易云失败，请稍后重试', 502, true);
-  } finally {
-    clearTimeout(timeout);
   }
+}
+
+function waitForRetry(milliseconds, signal) {
+  if (signal?.aborted) {
+    return Promise.reject(new NeteaseUpstreamError('UPSTREAM_TIMEOUT', '连接网易云超时，请检查网络后重试', 504, true));
+  }
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, milliseconds);
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(new NeteaseUpstreamError('UPSTREAM_TIMEOUT', '连接网易云超时，请检查网络后重试', 504, true));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    timeout.unref?.();
+  });
 }
 
 async function readLimitedText(response, maxBytes) {

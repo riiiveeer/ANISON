@@ -1,11 +1,35 @@
 {
-  "name": "ANISON",
+  "id": "/",
+  "name": "ANISON - 日语歌曲辅助练习",
   "short_name": "ANISON",
+  "description": "用喜欢的日语歌曲歌词进行学习与复习",
+  "lang": "zh-CN",
+  "dir": "ltr",
   "start_url": "./#/home",
   "scope": "./",
   "display": "standalone",
   "background_color": "#faf9f6",
   "theme_color": "#c44f4f",
-  "description": "用日语歌词进行学习与复习",
-  "icons": []
+  "prefer_related_applications": false,
+  "categories": ["education"],
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
 }

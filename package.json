@@ -1,6 +1,6 @@
 {
   "name": "anison",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.0-beta.4",
   "private": true,
   "description": "面向日语歌曲歌词的本地优先学习工具",
   "license": "Apache-2.0",
@@ -8,13 +8,18 @@
   "scripts": {
     "dev": "vite",
     "dev:lan": "vite --host 0.0.0.0",
-    "start": "vite",
+    "start": "node server/index.js",
+    "start:local": "node server/index.js",
     "open": "vite --open",
     "build": "vite build",
     "preview": "vite preview",
     "preview:lan": "vite preview --host 0.0.0.0",
     "test:netease:smoke": "node server/netease/smoke.js",
     "test": "node --test tests/*.test.js",
+    "test:e2e": "playwright test --grep-invert @perf",
+    "test:pwa": "npm run build && playwright test --config=playwright.pwa.config.js",
+    "test:perf": "playwright test --grep @perf",
+    "verify:deployment": "node scripts/verify-deployment.mjs",
     "check": "npm test && npm run build && npm audit --audit-level=high"
   },
   "repository": {
@@ -31,10 +36,18 @@
     "spaced-repetition",
     "vite"
   ],
+  "dependencies": {
+    "compression": "^1.8.1",
+    "express": "^5.2.1",
+    "helmet": "^8.3.0"
+  },
   "devDependencies": {
-    "vite": "^6.3.5"
+    "@playwright/test": "^1.62.1",
+    "fake-indexeddb": "^6.2.5",
+    "vite": "^6.3.5",
+    "yaml": "^2.9.0"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24 <25"
   }
 }

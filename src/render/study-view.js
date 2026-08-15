@@ -15,9 +15,10 @@ const STUDY_FILTERS = [
 ];
 
 export async function createStudyView({ context, navigate, query }) {
-  const libraryStore = createLibraryStore(context.repositories);
+  const libraryStore = createLibraryStore(context.repositories, { networkStatus: context.networkStatus });
   const element = document.createElement('section');
   element.className = 'page page-study focus-study-page';
+  let online = context.networkStatus?.getState?.().online !== false;
 
   let song = query.songId ? await libraryStore.getSongById(query.songId) : null;
   if (!song && songStore.songId) song = await libraryStore.getSongById(songStore.songId);
@@ -45,18 +46,28 @@ export async function createStudyView({ context, navigate, query }) {
       ? 'scroll'
       : 'card';
   let showReadingTranslations = localStorage.getItem(READING_TRANSLATION_STORAGE_KEY) !== 'hidden';
-  let currentCardId = query.cardId || song.progress?.currentCardId || getStudyCards()[0]?.id || '';
+  let currentCardId = query.cardId
+    || findFirstUnlearnedCardId(songStore.cards)
+    || song.progress?.currentCardId
+    || getStudyCards()[0]?.id
+    || '';
   let touchStartX = 0;
   let readingObserver = null;
   let readingObserverIgnoreUntil = 0;
   normalizeCurrentCard();
   await libraryStore.touchStudyEntry(song.id, currentCardId);
   render();
+  const unsubscribeNetwork = context.networkStatus?.subscribe?.(nextState => {
+    if (online === nextState.online) return;
+    online = nextState.online;
+    render();
+  });
 
   return {
     element,
     destroy() {
       readingObserver?.disconnect();
+      unsubscribeNetwork?.();
       delete document.body.dataset.studyMode;
     },
   };
@@ -213,6 +224,7 @@ export async function createStudyView({ context, navigate, query }) {
     const canFinish = isPassive
       || (card.learning?.state || 'new') !== 'new'
       || card.explain?.status === 'success';
+    const aiRequestDisabled = !online && card.explain?.status !== 'success';
     return `
       <article class="focus-lyric-card" data-focus-card>
         <div class="focus-card-meta">
@@ -251,13 +263,13 @@ export async function createStudyView({ context, navigate, query }) {
         <div class="focus-secondary-actions">
           ${isPassive ? '' : isCoveredRepeat ? `
             ${hasKey ? `
-              <button class="text-btn" type="button" data-action="explain">
+              <button class="text-btn" type="button" data-action="explain"${aiRequestDisabled ? ' disabled' : ''}>
                 ${card.explain?.status === 'success' ? '查看已有讲解' : '按需查看讲解'}
               </button>
             ` : ''}
           ` : hasKey ? `
-            <button class="explain-btn compact-explain" type="button" data-action="explain"${card.explain?.status === 'loading' ? ' disabled' : ''}>
-              ${escapeHtml(getExplainButtonText(card))}
+            <button class="explain-btn compact-explain" type="button" data-action="explain"${card.explain?.status === 'loading' || aiRequestDisabled ? ' disabled' : ''}>
+              ${escapeHtml(aiRequestDisabled ? '离线时无法请求 AI 讲解' : getExplainButtonText(card))}
             </button>
           ` : `
             <button class="text-btn" type="button" data-action="ai-settings">AI 未配置，前往设置</button>
@@ -269,7 +281,7 @@ export async function createStudyView({ context, navigate, query }) {
           ${card.explain?.status === 'success' ? `
             <form class="follow-up-row" data-follow-up-form>
               <textarea class="follow-up-input" name="question" rows="2" placeholder="继续追问这句歌词"></textarea>
-              <button class="btn-outline" type="submit">发送</button>
+              <button class="btn-outline" type="submit"${online ? '' : ' disabled'}>${online ? '发送' : '离线不可追问'}</button>
             </form>
           ` : ''}
         </section>
@@ -389,6 +401,15 @@ export async function createStudyView({ context, navigate, query }) {
       navigate('settings');
       return;
     }
+    if (!online) {
+      songStore.updateCardExplainState(card.id, {
+        status: 'error',
+        content: '',
+        error: '当前离线，联网后可继续使用 AI 讲解',
+      });
+      render();
+      return;
+    }
     songStore.updateCardUIState(card.id, { expanded: true });
     songStore.updateCardExplainState(card.id, { status: 'loading', content: '', error: '' });
     render();
@@ -399,6 +420,8 @@ export async function createStudyView({ context, navigate, query }) {
         card.extra?.romajiText || '',
         card.songContext || songStore.songContext || '',
         apiKey,
+        '',
+        { isOnline: () => online },
       );
       songStore.updateCardExplainState(card.id, { status: 'success', content: result, error: '' });
     } catch (error) {
@@ -413,6 +436,7 @@ export async function createStudyView({ context, navigate, query }) {
     const question = new FormData(event.currentTarget).get('question')?.trim();
     const apiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
     if (!card || !question || !apiKey) return;
+    if (!online) return;
     songStore.updateCardExplainState(card.id, { status: 'loading', content: '', error: '' });
     render();
     try {
@@ -423,6 +447,7 @@ export async function createStudyView({ context, navigate, query }) {
         card.songContext || songStore.songContext || '',
         apiKey,
         question,
+        { isOnline: () => online },
       );
       songStore.updateCardExplainState(card.id, { status: 'success', content: result, error: '' });
     } catch (error) {
@@ -483,6 +508,14 @@ function summarizeCards(cards) {
   return summarizeAnnotatedLearningUnits(cards);
 }
 
+function findFirstUnlearnedCardId(cards = []) {
+  return cards.find(card => (
+    card.learningUnit?.role === 'target'
+    && card.learningUnit?.representativeCardId === card.id
+    && (card.learning?.state || 'new') === 'new'
+  ))?.id || '';
+}
+
 function formatLearningState(state) {
   if (state === 'mastered') return '掌握';
   if (state === 'fuzzy') return '模糊';
@@ -519,6 +552,7 @@ function getStudyCompletionMessage(card) {
 
 export const __testables__ = {
   summarizeCards,
+  findFirstUnlearnedCardId,
   formatCardLearningState,
   getStudyCompletionMessage,
 };

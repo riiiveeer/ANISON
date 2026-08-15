@@ -12,11 +12,18 @@ import { initializeDatabase } from '../db/indexed-db.js';
 import { createSongRepository } from '../db/song-repository.js';
 import { createPlaylistRepository } from '../db/playlist-repository.js';
 import { createProgressRepository } from '../db/progress-repository.js';
+import { createLearningRepository } from '../db/learning-repository.js';
+import { createDataRepository, recoverInterruptedRestore } from '../db/data-repository.js';
 import { createHomeView } from '../render/home-view.js';
 import { createLibraryView } from '../render/library-view.js';
 import { createReviewView } from '../render/review-view.js';
 import { createStudyView } from '../render/study-view.js';
 import { createSettingsView } from '../render/settings-view.js';
+import { createPwaStatusView } from '../render/pwa-status-view.js';
+import { BUILD_INFO } from './app-version.js';
+import { createCriticalOperations } from '../pwa/critical-operation.js';
+import { createNetworkStatus } from '../pwa/network-status.js';
+import { createPwaManager } from '../pwa/pwa-manager.js';
 
 export async function bootstrapApp() {
   const pageRoot = document.getElementById('page-root');
@@ -24,19 +31,74 @@ export async function bootstrapApp() {
   const statusMessage = document.getElementById('app-status-message');
   const dismissStatusButton = document.getElementById('dismiss-status-button');
   const retryStatusButton = document.getElementById('retry-status-button');
+  const pwaStatusRegion = document.getElementById('pwa-status-region');
   const headerLibraryButton = document.getElementById('header-library-button');
   const navButtons = Array.from(document.querySelectorAll('.nav-btn'));
 
-  if (!pageRoot || !statusPill || !statusMessage) {
+  if (!pageRoot || !statusPill || !statusMessage || !pwaStatusRegion) {
     throw new Error('应用壳层缺少必要挂载节点');
   }
+
+  const criticalOperations = createCriticalOperations();
+  const networkStatus = createNetworkStatus({ navigator, window });
+  const pwaManager = createPwaManager({
+    navigator,
+    window,
+    buildInfo: BUILD_INFO,
+    criticalOperations,
+    enabled: Boolean(import.meta.env?.PROD),
+  });
+  networkStatus.start();
+  pwaManager.start();
+  createPwaStatusView({
+    root: pwaStatusRegion,
+    pwaManager,
+    networkStatus,
+    window,
+  });
 
   dismissStatusButton?.addEventListener('click', () => statusPill.classList.add('hidden'));
   retryStatusButton?.addEventListener('click', () => window.location.reload());
 
   let dbContext = null;
+  const releaseStartupOperation = criticalOperations.acquire('startup-data');
   try {
-    dbContext = await initializeDatabase();
+    dbContext = await initializeDatabase({
+      onUpgradeProgress(report) {
+        if (!report?.totalSongs) return;
+        const phaseLabel = {
+          scan: '扫描旧曲库',
+          write: '写入聚合数据',
+          index: '建立学习索引',
+          verify: '验证升级结果',
+          complete: '完成升级',
+          failed: '升级失败',
+        }[report.phase] || '升级本地数据';
+        showStatus(
+          statusPill,
+          statusMessage,
+          `${phaseLabel} ${report.completedSongs || 0}/${report.totalSongs}`,
+          report.phase === 'failed' ? 'error' : 'info',
+          retryStatusButton,
+        );
+      },
+    });
+    window.__ANISON_UPGRADE_REPORT__ = Object.freeze({
+      ...dbContext.upgradeReport,
+      phaseDurations: Object.freeze({ ...(dbContext.upgradeReport?.phaseDurations || {}) }),
+    });
+    await recoverInterruptedRestore(dbContext, {
+      onProgress({ storeName, completed, total }) {
+        showStatus(
+          statusPill,
+          statusMessage,
+          `正在恢复上次未完成的数据操作：${storeName || ''} ${completed || 0}/${total || 0}`,
+          'info',
+          retryStatusButton,
+        );
+      },
+    });
+    statusPill.classList.add('hidden');
   } catch (error) {
     console.error(error);
     showStatus(
@@ -46,17 +108,25 @@ export async function bootstrapApp() {
       'error',
       retryStatusButton,
     );
+    return;
+  } finally {
+    releaseStartupOperation();
   }
 
   const repositories = {
     songs: createSongRepository(dbContext),
     playlists: createPlaylistRepository(dbContext),
     progress: createProgressRepository(dbContext),
+    learning: createLearningRepository(dbContext),
+    data: createDataRepository(dbContext),
   };
 
   const routeContext = {
     repositories,
     dbReady: Boolean(dbContext),
+    pwaManager,
+    networkStatus,
+    criticalOperations,
     setStatus(message, kind = 'info') {
       if (kind === 'error') showStatus(statusPill, statusMessage, message, kind);
     },
@@ -87,7 +157,6 @@ export async function bootstrapApp() {
   headerLibraryButton?.addEventListener('click', () => router.navigate('library'));
 
   router.start();
-  registerServiceWorker();
 }
 
 function showStatus(statusPill, statusMessage, message, kind = 'error', retryButton = null) {
@@ -95,15 +164,4 @@ function showStatus(statusPill, statusMessage, message, kind = 'error', retryBut
   statusPill.dataset.kind = kind;
   retryButton?.classList.toggle('hidden', kind !== 'error');
   statusPill.classList.remove('hidden');
-}
-
-function registerServiceWorker() {
-  if (!('serviceWorker' in navigator)) return;
-
-  window.addEventListener('load', () => {
-    const serviceWorkerUrl = new URL('./sw.js', document.baseURI);
-    navigator.serviceWorker.register(serviceWorkerUrl, { scope: './' }).catch(error => {
-      console.warn('Service worker 注册失败:', error);
-    });
-  });
 }

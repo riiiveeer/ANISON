@@ -66,6 +66,29 @@ test('网易云客户端：普通接口结构异常时回退 weapi', async () =>
   assert.equal(call, 4);
 });
 
+test('网易云客户端：整体超时会取消所有上游请求且不进入回退链', async () => {
+  let calls = 0;
+  let aborted = 0;
+  const client = createNeteaseClient({
+    timeoutMs: 10,
+    fetchImpl(_url, options) {
+      calls += 1;
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          aborted += 1;
+          reject(new DOMException('aborted', 'AbortError'));
+        }, { once: true });
+      });
+    },
+  });
+  await assert.rejects(
+    client.getSongPreview('123'),
+    error => error.code === 'UPSTREAM_TIMEOUT' && error.status === 504,
+  );
+  assert.equal(calls, 2);
+  assert.equal(aborted, 2);
+});
+
 test('网易云客户端：YRC 可压平为行级 LRC，封面只允许可信 HTTPS 域名', () => {
   const lrc = convertYrcToLrc('[1200,3000](1200,500,0)君(1700,500,0)の名');
   assert.equal(lrc, '[00:01.20]君の名');
@@ -98,21 +121,26 @@ test('网易云预览服务：相同歌曲命中缓存', async () => {
 });
 
 test('浏览器歌词提供器：合并轨道分析并转换结构化错误', async () => {
+  let browserRequestOptions;
   const provider = createNeteaseLyricProvider({
-    fetchImpl: async () => jsonResponse({
-      ok: true,
-      song: { source: 'netease', sourceSongId: '1', title: 'Song' },
-      tracks: {
-        original: { available: true, rawLrc: '[00:01.00]君' },
-        translation: { available: false, rawLrc: '' },
-        romaji: { available: false, rawLrc: '' },
-      },
-      warnings: [],
-    }),
+    fetchImpl: async (_url, options) => {
+      browserRequestOptions = options;
+      return jsonResponse({
+        ok: true,
+        song: { source: 'netease', sourceSongId: '1', title: 'Song' },
+        tracks: {
+          original: { available: true, rawLrc: '[00:01.00]君' },
+          translation: { available: false, rawLrc: '' },
+          romaji: { available: false, rawLrc: '' },
+        },
+        warnings: [],
+      });
+    },
   });
   const preview = await provider.previewSong('1');
   assert.equal(preview.analysis.cardCount, 1);
   assert.ok(preview.warnings.some(item => item.code === 'TRANSLATION_MISSING'));
+  assert.equal(browserRequestOptions.headers['X-ANISON-Request'], '1');
 
   const failingProvider = createNeteaseLyricProvider({
     fetchImpl: async () => jsonResponse({
@@ -124,4 +152,17 @@ test('浏览器歌词提供器：合并轨道分析并转换结构化错误', as
     failingProvider.previewSong('2'),
     error => error.code === 'SONG_NOT_FOUND' && error.message === '没有找到歌曲',
   );
+});
+
+test('浏览器歌词提供器：明确离线时不访问网关', async () => {
+  let fetchCalls = 0;
+  const provider = createNeteaseLyricProvider({
+    isOnline: () => false,
+    fetchImpl: async () => { fetchCalls += 1; },
+  });
+  await assert.rejects(
+    provider.previewSong('1'),
+    error => error.code === 'OFFLINE' && error.retryable,
+  );
+  assert.equal(fetchCalls, 0);
 });

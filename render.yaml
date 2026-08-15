@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: anison-web
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeployTrigger: checksPass
+    maxShutdownDelaySeconds: 15
+    renderSubdomainPolicy: enabled
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CSP_MODE
+        value: report-only
+      - key: BETA_AUTH_USERNAME
+        sync: false
+      - key: BETA_AUTH_PASSWORD
+        sync: false
