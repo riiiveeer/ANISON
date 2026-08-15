@@ -259,7 +259,7 @@ export function createLibraryStore(repositories, options = {}) {
       const progress = song.progress
         || await repositories.progress?.getProgressBySongId?.(songId)
         || null;
-      const hydratedSong = song.storageVersion === 3 ? song : hydrateSongCards(song, progress);
+      const hydratedSong = Number(song.storageVersion) >= 3 ? song : hydrateSongCards(song, progress);
       return {
         ...hydratedSong,
         progress,
@@ -268,6 +268,11 @@ export function createLibraryStore(repositories, options = {}) {
     },
 
     async updateSongMeta(songId, { title = '', artist = '' }) {
+      if (repositories.songs.updateSongMeta) {
+        const updated = await repositories.songs.updateSongMeta(songId, { title, artist });
+        if (!updated) throw new Error('未找到要编辑的歌曲');
+        return this.getSongById(songId);
+      }
       const song = await repositories.songs.getSongById(songId);
       if (!song) throw new Error('未找到要编辑的歌曲');
       const nextSong = {

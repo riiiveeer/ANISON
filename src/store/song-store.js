@@ -152,7 +152,7 @@ class SongStore {
       ));
       return;
     }
-    if (progress.storageVersion === 3) return;
+    if (Number(progress.storageVersion) >= 3) return;
     this.cards = applyLearningUnitProgress(this.cards, progress);
   }
 

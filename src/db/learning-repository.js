@@ -4,6 +4,11 @@ import {
   learningFromUnitRecord,
 } from './normalized-song.js';
 import {
+  createDefaultLearningState,
+  shouldPersistLearningState,
+  SONG_STORAGE_VERSION,
+} from './song-document.js';
+import {
   learningStateForGrade,
   scheduleNextReview,
 } from '../engine/review-scheduler.js';
@@ -23,7 +28,7 @@ export function createLearningRepository(dbContext) {
 
     async countReviewItems({ filter = 'due', dueBefore = Date.now() } = {}) {
       if (!dbContext?.database) return 0;
-      return runTransaction(dbContext, 'learningUnits', 'readonly', store => {
+      return runTransaction(dbContext, 'learningStates', 'readonly', store => {
         const { indexName, range } = createReviewQuery(filter, dueBefore, null);
         return requestToPromise(store.index(indexName).count(range), '统计复习项目失败');
       });
@@ -37,7 +42,7 @@ export function createLearningRepository(dbContext) {
     } = {}) {
       if (!dbContext?.database) return { items: [], nextCursor: null };
       const pageSize = Math.max(1, Math.min(50, Number(limit) || 50));
-      const records = await runTransaction(dbContext, 'learningUnits', 'readonly', store => {
+      const records = await runTransaction(dbContext, 'learningStates', 'readonly', store => {
         const query = createReviewQuery(filter, dueBefore, cursor);
         return readCursorPage(store.index(query.indexName), query.range, query.direction, pageSize);
       });
@@ -50,21 +55,22 @@ export function createLearningRepository(dbContext) {
       const timestamp = Date.now();
       return runTransaction(
         dbContext,
-        ['cards', 'learningUnits', 'progress', 'songs'],
+        ['songContents', 'learningStates', 'progress', 'songs'],
         'readwrite',
         async stores => {
-          const card = await requestToPromise(
-            stores.cards.get([songId, cardId]),
-            '读取歌词卡失败',
+          const content = await requestToPromise(
+            stores.songContents.get(songId),
+            '读取歌曲内容失败',
           );
+          const card = content?.cards?.find(item => item.id === cardId);
           if (!card?.learningUnitId || card.learningRole !== 'target') return null;
           const unitKey = createLearningUnitKey(songId, card.learningUnitId);
           const [unit, song, currentProgress] = await Promise.all([
-            requestToPromise(stores.learningUnits.get(unitKey), '读取学习单元失败'),
+            requestToPromise(stores.learningStates.get(unitKey), '读取学习状态失败'),
             requestToPromise(stores.songs.get(songId), '读取歌曲失败'),
             requestToPromise(stores.progress.get(songId), '读取学习进度失败'),
           ]);
-          if (!unit || !song) return null;
+          if (!song) return null;
 
           const previous = learningFromUnitRecord(unit);
           const grade = patch.grade || legacyGradeForState(patch.state);
@@ -89,7 +95,7 @@ export function createLearningRepository(dbContext) {
                 : previous.nextReviewAt,
           };
           const nextUnit = {
-            ...unit,
+            ...(unit || createDefaultLearningState(songId, card)),
             state: nextLearning.state,
             favoriteKey: nextLearning.favorite ? 1 : undefined,
             reviewableKey: !['new', 'mastered'].includes(nextLearning.state) ? 1 : undefined,
@@ -103,8 +109,11 @@ export function createLearningRepository(dbContext) {
           };
           const progress = updateProgressCounts(song, currentProgress, previous, nextLearning, cardId, timestamp);
           const nextSong = { ...song, lastStudiedAt: timestamp, updatedAt: timestamp };
+          const stateRequest = shouldPersistLearningState(nextUnit)
+            ? stores.learningStates.put(nextUnit)
+            : stores.learningStates.delete(unitKey);
           await Promise.all([
-            requestToPromise(stores.learningUnits.put(nextUnit), '保存学习单元失败'),
+            requestToPromise(stateRequest, '保存学习状态失败'),
             requestToPromise(stores.progress.put(progress), '保存学习进度失败'),
             requestToPromise(stores.songs.put(nextSong), '更新歌曲学习时间失败'),
           ]);
@@ -140,24 +149,30 @@ function updateProgressCounts(song, progress, previous, next, cardId, timestamp)
     favoriteCount,
     completionRate: totalUnits ? studiedCount / totalUnits : 0,
     lastStudiedAt: timestamp,
-    storageVersion: 3,
+    storageVersion: SONG_STORAGE_VERSION,
   };
 }
 
 async function hydrateReviewItems(dbContext, units) {
   if (!units.length) return [];
-  return runTransaction(dbContext, ['cards', 'songs'], 'readonly', async stores => {
+  return runTransaction(dbContext, ['songContents', 'songs'], 'readonly', async stores => {
     const songCache = new Map();
+    const contentCache = new Map();
     return Promise.all(units.map(async unit => {
       let song = songCache.get(unit.songId);
       if (!song) {
         song = await requestToPromise(stores.songs.get(unit.songId), '读取复习歌曲失败');
         songCache.set(unit.songId, song);
       }
-      const card = await requestToPromise(
-        stores.cards.get([unit.songId, unit.representativeCardId]),
-        '读取复习歌词卡失败',
-      );
+      let content = contentCache.get(unit.songId);
+      if (!content) {
+        content = await requestToPromise(
+          stores.songContents.get(unit.songId),
+          '读取复习歌曲内容失败',
+        );
+        contentCache.set(unit.songId, content);
+      }
+      const card = content?.cards?.find(item => item.id === unit.representativeCardId);
       return {
         ...card,
         id: card?.id || unit.representativeCardId,

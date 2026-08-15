@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createDataBackupService } from '../src/store/data-backup.js';
+import { decomposeSong } from '../src/db/normalized-song.js';
 
 function createMemoryRepositories() {
   const data = {
@@ -55,11 +56,17 @@ test('data backup: 完整导出后可清空并恢复', async () => {
   const { data, repositories } = createMemoryRepositories();
   const service = createDataBackupService(repositories);
   const backup = await service.exportData();
-  assert.equal(backup.schemaVersion, 2);
-  assert.ok(Array.isArray(backup.data.songLyrics));
-  assert.ok(Array.isArray(backup.data.cards));
-  assert.ok(Array.isArray(backup.data.learningUnits));
-  assert.deepEqual(service.validateBackup(backup), { songs: 1, playlists: 1, progress: 1 });
+  assert.equal(backup.schemaVersion, 3);
+  assert.ok(Array.isArray(backup.data.songContents));
+  assert.ok(Array.isArray(backup.data.learningStates));
+  assert.deepEqual(service.validateBackup(backup), {
+    songs: 1,
+    playlists: 1,
+    progress: 1,
+    cards: 0,
+    learningUnits: 0,
+    learningStates: 0,
+  });
 
   await service.clearAll();
   assert.equal(data.songs.length, 0);
@@ -121,10 +128,77 @@ test('data backup: v1 重复歌词转换为共享学习单元', async () => {
   await service.importData(backup);
 
   assert.equal(restored.songs.length, 1);
-  assert.equal(restored.songLyrics[0].rawLrc, backup.data.songs[0].rawLrc);
-  assert.equal(restored.cards.length, 2);
-  assert.equal(restored.learningUnits.length, 1);
-  assert.equal(restored.learningUnits[0].state, 'mastered');
-  assert.equal(restored.learningUnits[0].favoriteKey, 1);
+  assert.equal(restored.songContents[0].rawLrc, backup.data.songs[0].rawLrc);
+  assert.equal(restored.songContents[0].cards.length, 2);
+  assert.equal(restored.learningStates.length, 1);
+  assert.equal(restored.learningStates[0].state, 'mastered');
+  assert.equal(restored.learningStates[0].favoriteKey, 1);
   assert.equal(restored.progress[0].studiedCount, 1);
+});
+
+test('data backup: v2 规范化数组转换为 v4 聚合内容和稀疏状态', async () => {
+  let restored = null;
+  const service = createDataBackupService({
+    data: {
+      async replaceAll(data) { restored = data; },
+    },
+  });
+  const normalized = decomposeSong({
+    id: 'backup-v2',
+    title: 'Backup v2',
+    rawLrc: '[00:01.00]君',
+    cards: [{
+      id: 'backup-card',
+      lyric: '君',
+      translation: '你',
+      type: 'jp-zh',
+      learning: { state: 'learning', studiedAt: 1, nextReviewAt: 2 },
+    }],
+  });
+  await service.importData({
+    app: 'ANISON',
+    schemaVersion: 2,
+    data: {
+      songs: [normalized.song],
+      songLyrics: [normalized.lyrics],
+      cards: normalized.cards,
+      learningUnits: normalized.learningUnits,
+      progress: [normalized.progress],
+      playlists: [],
+      importJobs: [],
+    },
+  });
+
+  assert.equal(restored.songContents.length, 1);
+  assert.equal(restored.songContents[0].cards.length, 1);
+  assert.equal(restored.learningStates.length, 1);
+  assert.equal(restored.learningStates[0].state, 'learning');
+});
+
+test('data backup: v3 在覆盖前拒绝重复主键、孤立状态和清单篡改', async () => {
+  globalThis.localStorage = {
+    getItem() { return null; },
+    setItem() {},
+    removeItem() {},
+  };
+  const { repositories } = createMemoryRepositories();
+  const service = createDataBackupService(repositories);
+  const valid = await service.exportData();
+
+  const duplicate = structuredClone(valid);
+  duplicate.data.songContents.push(duplicate.data.songContents[0]);
+  assert.throws(() => service.validateBackup(duplicate), /主键重复/);
+
+  const orphan = structuredClone(valid);
+  orphan.data.learningStates.push({
+    key: 'missing\u0000unit',
+    songId: 'missing',
+    unitId: 'unit',
+    state: 'learning',
+  });
+  assert.throws(() => service.validateBackup(orphan), /不存在的学习单元/);
+
+  const alteredManifest = structuredClone(valid);
+  alteredManifest.manifest.songs = 2;
+  assert.throws(() => service.validateBackup(alteredManifest), /统计 songs 不一致/);
 });

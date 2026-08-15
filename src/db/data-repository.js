@@ -1,7 +1,7 @@
 import { requestToPromise, runTransaction } from './indexed-db.js';
 
 export const BUSINESS_STORES = [
-  'songs', 'songLyrics', 'cards', 'learningUnits',
+  'songs', 'songContents', 'learningStates',
   'progress', 'playlists', 'importJobs',
 ];
 const RESTORE_META_KEY = 'restore:active';
@@ -12,9 +12,17 @@ export function createDataRepository(dbContext) {
     async getOverview() {
       if (!dbContext?.database) return emptyOverview();
       return runTransaction(dbContext, BUSINESS_STORES, 'readonly', async stores => {
-        const counts = await Promise.all(BUSINESS_STORES.map(storeName =>
-          requestToPromise(stores[storeName].count(), `统计 ${storeName} 失败`)));
-        return Object.fromEntries(BUSINESS_STORES.map((name, index) => [name, counts[index]]));
+        const [counts, contents] = await Promise.all([
+          Promise.all(BUSINESS_STORES.map(storeName =>
+            requestToPromise(stores[storeName].count(), `统计 ${storeName} 失败`))),
+          requestToPromise(stores.songContents.getAll(), '统计逻辑歌词卡失败'),
+        ]);
+        const overview = Object.fromEntries(
+          BUSINESS_STORES.map((name, index) => [name, counts[index]]),
+        );
+        overview.cards = contents.reduce((sum, content) => sum + (content.cards?.length || 0), 0);
+        overview.learningUnits = contents.reduce((sum, content) => sum + countLogicalUnits(content), 0);
+        return overview;
       });
     },
 
@@ -234,7 +242,19 @@ function emptyData() {
 }
 
 function emptyOverview() {
-  return Object.fromEntries(BUSINESS_STORES.map(name => [name, 0]));
+  return {
+    ...Object.fromEntries(BUSINESS_STORES.map(name => [name, 0])),
+    cards: 0,
+    learningUnits: 0,
+  };
+}
+
+function countLogicalUnits(content) {
+  return new Set(
+    (content?.cards || [])
+      .filter(card => card.learningRole === 'target' && card.learningUnitId)
+      .map(card => card.learningUnitId),
+  ).size;
 }
 
 function throwIfAborted(signal) {

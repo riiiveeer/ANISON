@@ -29,12 +29,12 @@ test('导入、学习、复习、刷新、备份、清空和恢复主链路', as
 
   await page.evaluate(async () => {
     const database = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('anison-study-db', 3);
+      const request = indexedDB.open('anison-study-db', 4);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const transaction = database.transaction('learningUnits', 'readwrite');
-    const index = transaction.objectStore('learningUnits').index('history');
+    const transaction = database.transaction('learningStates', 'readwrite');
+    const index = transaction.objectStore('learningStates').index('history');
     const cursorRequest = index.openCursor();
     await new Promise((resolve, reject) => {
       cursorRequest.onsuccess = () => {

@@ -6,8 +6,11 @@
  * 3. 抽象本地读写错误，避免上层直接接触原始 IDB 异常。
  */
 
+import { migrateDatabaseV4 } from './database-migration.js';
+import { SONG_STORAGE_VERSION } from './song-document.js';
+
 export const ANISON_DB_NAME = 'anison-study-db';
-export const ANISON_DB_VERSION = 3;
+export const ANISON_DB_VERSION = SONG_STORAGE_VERSION;
 
 const STORE_DEFINITIONS = {
   songs: {
@@ -17,18 +20,11 @@ const STORE_DEFINITIONS = {
       'contentHash', 'fileNameKey', 'titleArtistKey', 'sourceKey',
     ],
   },
-  songLyrics: {
+  songContents: {
     keyPath: 'songId',
     indexes: [],
   },
-  cards: {
-    keyPath: ['songId', 'id'],
-    indexes: [
-      { name: 'songId', keyPath: 'songId' },
-      { name: 'songLearningUnit', keyPath: ['songId', 'learningUnitId'] },
-    ],
-  },
-  learningUnits: {
+  learningStates: {
     keyPath: 'key',
     indexes: [
       'songId',
@@ -58,49 +54,67 @@ const STORE_DEFINITIONS = {
     keyPath: ['sessionId', 'storeName', 'sequence'],
     indexes: ['sessionId'],
   },
+  migrationArchive: {
+    keyPath: 'songId',
+    indexes: [],
+  },
 };
 
-export async function initializeDatabase() {
+export async function initializeDatabase({ onUpgradeProgress } = {}) {
   if (!window.indexedDB) {
     throw createStorageError('当前浏览器不支持 IndexedDB');
   }
 
-  const database = await openDatabase(ANISON_DB_NAME, ANISON_DB_VERSION, upgradeDatabase);
+  const { database, upgradeReport } = await openDatabase(
+    ANISON_DB_NAME,
+    ANISON_DB_VERSION,
+    (db, oldVersion, newVersion, transaction) =>
+      upgradeDatabase(db, oldVersion, newVersion, transaction, { onUpgradeProgress }),
+  );
   return {
     name: database.name,
     version: database.version,
     database,
+    upgradeReport,
   };
 }
 
-function upgradeDatabase(database, oldVersion, newVersion, upgradeTransaction) {
+function upgradeDatabase(
+  database,
+  oldVersion,
+  newVersion,
+  upgradeTransaction,
+  { onUpgradeProgress } = {},
+) {
   Object.entries(STORE_DEFINITIONS).forEach(([storeName, definition]) => {
     if (!database.objectStoreNames.contains(storeName)) {
       const store = database.createObjectStore(storeName, { keyPath: definition.keyPath });
-      definition.indexes.forEach(index => {
-        const normalized = normalizeIndexDefinition(index);
-        store.createIndex(normalized.name, normalized.keyPath, { unique: normalized.unique });
-      });
+      if (oldVersion === 0 || storeName !== 'learningStates') createIndexes(store, definition);
       return;
     }
 
     const transactionStore = upgradeTransaction.objectStore(storeName);
-    definition.indexes.forEach(index => {
-      const normalized = normalizeIndexDefinition(index);
-      if (!transactionStore.indexNames.contains(normalized.name)) {
-        transactionStore.createIndex(normalized.name, normalized.keyPath, { unique: normalized.unique });
-      }
-    });
+    if (oldVersion === 0 || storeName !== 'learningStates') createIndexes(transactionStore, definition);
+  });
+
+  if (oldVersion === 0) return createEmptyUpgradeReport(newVersion);
+  return migrateDatabaseV4(database, upgradeTransaction, {
+    oldVersion,
+    onProgress: onUpgradeProgress,
+    createLearningStateIndexes(store) {
+      createIndexes(store, STORE_DEFINITIONS.learningStates);
+    },
   });
 }
 
 function openDatabase(name, version, onUpgradeNeeded) {
   return new Promise((resolve, reject) => {
     const request = window.indexedDB.open(name, version);
+    let upgradeReport = null;
 
     request.onupgradeneeded = event => {
       const database = event.target.result;
-      onUpgradeNeeded(
+      upgradeReport = onUpgradeNeeded(
         database,
         event.oldVersion,
         event.newVersion || version,
@@ -110,7 +124,7 @@ function openDatabase(name, version, onUpgradeNeeded) {
 
     request.onsuccess = () => {
       request.result.onversionchange = () => request.result.close();
-      resolve(request.result);
+      resolve({ database: request.result, upgradeReport });
     };
     request.onerror = () => reject(createStorageError(request.error?.message || '数据库打开失败', request.error));
     request.onblocked = () => reject(createStorageError('本地数据升级被旧页面阻塞，请关闭其他 ANISON 标签页后刷新重试'));
@@ -154,6 +168,29 @@ export function requestToPromise(request, message = '数据库请求失败') {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(createStorageError(message, request.error));
   });
+}
+
+function createIndexes(store, definition) {
+  definition.indexes.forEach(index => {
+    const normalized = normalizeIndexDefinition(index);
+    if (!store.indexNames.contains(normalized.name)) {
+      store.createIndex(normalized.name, normalized.keyPath, { unique: normalized.unique });
+    }
+  });
+}
+
+function createEmptyUpgradeReport(version) {
+  return {
+    fromVersion: 0,
+    toVersion: version,
+    phase: 'complete',
+    totalSongs: 0,
+    completedSongs: 0,
+    logicalCards: 0,
+    logicalLearningUnits: 0,
+    persistedLearningStates: 0,
+    durationMs: 0,
+  };
 }
 
 export function deleteByIndex(store, indexName, key, message = '删除关联数据失败') {

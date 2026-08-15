@@ -13,7 +13,6 @@ import { createSongRepository } from '../db/song-repository.js';
 import { createPlaylistRepository } from '../db/playlist-repository.js';
 import { createProgressRepository } from '../db/progress-repository.js';
 import { createLearningRepository } from '../db/learning-repository.js';
-import { migrateDatabaseV3 } from '../db/database-migration.js';
 import { createDataRepository, recoverInterruptedRestore } from '../db/data-repository.js';
 import { createHomeView } from '../render/home-view.js';
 import { createLibraryView } from '../render/library-view.js';
@@ -64,25 +63,32 @@ export async function bootstrapApp() {
   let dbContext = null;
   const releaseStartupOperation = criticalOperations.acquire('startup-data');
   try {
-    dbContext = await initializeDatabase();
+    dbContext = await initializeDatabase({
+      onUpgradeProgress(report) {
+        if (!report?.totalSongs) return;
+        const phaseLabel = {
+          scan: '扫描旧曲库',
+          write: '写入聚合数据',
+          index: '建立学习索引',
+          verify: '验证升级结果',
+          complete: '完成升级',
+          failed: '升级失败',
+        }[report.phase] || '升级本地数据';
+        showStatus(
+          statusPill,
+          statusMessage,
+          `${phaseLabel} ${report.completedSongs || 0}/${report.totalSongs}`,
+          report.phase === 'failed' ? 'error' : 'info',
+          retryStatusButton,
+        );
+      },
+    });
     await recoverInterruptedRestore(dbContext, {
       onProgress({ storeName, completed, total }) {
         showStatus(
           statusPill,
           statusMessage,
           `正在恢复上次未完成的数据操作：${storeName || ''} ${completed || 0}/${total || 0}`,
-          'info',
-          retryStatusButton,
-        );
-      },
-    });
-    await migrateDatabaseV3(dbContext, {
-      onProgress({ total, completed, songTitle }) {
-        if (!total) return;
-        showStatus(
-          statusPill,
-          statusMessage,
-          `正在升级本地曲库 ${completed}/${total}${songTitle ? `：${songTitle}` : ''}`,
           'info',
           retryStatusButton,
         );

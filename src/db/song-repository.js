@@ -5,12 +5,15 @@ import {
 } from './indexed-db.js';
 import {
   createProgressSummaryFromRecords,
-  decomposeSong,
-  hydrateSong,
   normalizeLookupText,
 } from './normalized-song.js';
+import {
+  createSongDocument,
+  hydrateSongDocument,
+  SONG_STORAGE_VERSION,
+} from './song-document.js';
 
-const SONG_STORES = ['songs', 'songLyrics', 'cards', 'learningUnits', 'progress'];
+const SONG_STORES = ['songs', 'songContents', 'learningStates', 'progress'];
 
 export function createSongRepository(dbContext) {
   return {
@@ -71,14 +74,16 @@ export function createSongRepository(dbContext) {
     async getSongById(songId) {
       if (!dbContext?.database) return null;
       return runTransaction(dbContext, SONG_STORES, 'readonly', async stores => {
-        const [song, lyrics, cards, learningUnits, progress] = await Promise.all([
+        const [song, content, learningStates, progress] = await Promise.all([
           requestToPromise(stores.songs.get(songId), '读取歌曲失败'),
-          requestToPromise(stores.songLyrics.get(songId), '读取歌词失败'),
-          requestToPromise(stores.cards.index('songId').getAll(songId), '读取歌词卡失败'),
-          requestToPromise(stores.learningUnits.index('songId').getAll(songId), '读取学习状态失败'),
+          requestToPromise(stores.songContents.get(songId), '读取歌曲内容失败'),
+          requestToPromise(
+            stores.learningStates.index('songId').getAll(songId),
+            '读取学习状态失败',
+          ),
           requestToPromise(stores.progress.get(songId), '读取学习进度失败'),
         ]);
-        return hydrateSong(song, lyrics, cards, learningUnits, progress);
+        return hydrateSongDocument(song, content, learningStates, progress);
       });
     },
 
@@ -109,29 +114,41 @@ export function createSongRepository(dbContext) {
         updatedAt: song.updatedAt || Date.now(),
         createdAt: song.createdAt || Date.now(),
       };
-      const normalized = decomposeSong(payload, payload.progress);
+      const document = createSongDocument(payload, payload.progress);
 
       await runTransaction(dbContext, SONG_STORES, 'readwrite', async stores => {
+        await deleteByIndex(stores.learningStates, 'songId', song.id, '替换学习状态失败');
         await Promise.all([
-          deleteByIndex(stores.cards, 'songId', song.id, '替换歌词卡失败'),
-          deleteByIndex(stores.learningUnits, 'songId', song.id, '替换学习单元失败'),
-        ]);
-        await Promise.all([
-          requestToPromise(stores.songs.put(normalized.song), '保存歌曲失败'),
-          requestToPromise(stores.songLyrics.put(normalized.lyrics), '保存歌词失败'),
-          requestToPromise(stores.progress.put(normalized.progress), '保存学习进度失败'),
-          ...normalized.cards.map(card => requestToPromise(stores.cards.put(card), '保存歌词卡失败')),
-          ...normalized.learningUnits.map(unit =>
-            requestToPromise(stores.learningUnits.put(unit), '保存学习单元失败')),
+          requestToPromise(stores.songs.put(document.song), '保存歌曲失败'),
+          requestToPromise(stores.songContents.put(document.content), '保存歌曲内容失败'),
+          requestToPromise(stores.progress.put(document.progress), '保存学习进度失败'),
+          ...document.learningStates.map(state =>
+            requestToPromise(stores.learningStates.put(state), '保存学习状态失败')),
         ]);
       });
-      return hydrateSong(
-        normalized.song,
-        normalized.lyrics,
-        normalized.cards,
-        normalized.learningUnits,
-        normalized.progress,
+      return hydrateSongDocument(
+        document.song,
+        document.content,
+        document.learningStates,
+        document.progress,
       );
+    },
+
+    async updateSongMeta(songId, { title = '', artist = '' } = {}) {
+      if (!dbContext?.database) return null;
+      return runTransaction(dbContext, 'songs', 'readwrite', async store => {
+        const song = await requestToPromise(store.get(songId), '读取歌曲失败');
+        if (!song) return null;
+        const next = {
+          ...song,
+          title: String(title || '').trim() || '未命名歌曲',
+          artist: String(artist || '').trim(),
+          updatedAt: Date.now(),
+        };
+        next.titleArtistKey = `${normalizeLookupText(next.title)}\u0000${normalizeLookupText(next.artist)}`;
+        await requestToPromise(store.put(next), '更新歌曲信息失败');
+        return next;
+      });
     },
 
     async deleteSong(songId) {
@@ -139,10 +156,9 @@ export function createSongRepository(dbContext) {
       return runTransaction(dbContext, [...SONG_STORES, 'playlists'], 'readwrite', async stores => {
         await Promise.all([
           requestToPromise(stores.songs.delete(songId), '删除歌曲失败'),
-          requestToPromise(stores.songLyrics.delete(songId), '删除歌词失败'),
+          requestToPromise(stores.songContents.delete(songId), '删除歌曲内容失败'),
           requestToPromise(stores.progress.delete(songId), '删除学习进度失败'),
-          deleteByIndex(stores.cards, 'songId', songId, '删除歌词卡失败'),
-          deleteByIndex(stores.learningUnits, 'songId', songId, '删除学习单元失败'),
+          deleteByIndex(stores.learningStates, 'songId', songId, '删除学习状态失败'),
           removeSongFromPlaylists(stores.playlists, songId),
         ]);
       });
@@ -176,7 +192,7 @@ export function createSongRepository(dbContext) {
           ...progress,
           currentCardId: currentCardId || progress?.currentCardId || '',
           lastStudiedAt: timestamp,
-          storageVersion: 3,
+          storageVersion: SONG_STORAGE_VERSION,
         };
         await Promise.all([
           requestToPromise(stores.songs.put(nextSong), '更新歌曲时间失败'),
@@ -188,20 +204,19 @@ export function createSongRepository(dbContext) {
 
     async exportNormalizedData() {
       if (!dbContext?.database) {
-        return { songs: [], songLyrics: [], cards: [], learningUnits: [] };
+        return { songs: [], songContents: [], learningStates: [] };
       }
       return runTransaction(
         dbContext,
-        ['songs', 'songLyrics', 'cards', 'learningUnits'],
+        ['songs', 'songContents', 'learningStates'],
         'readonly',
         async stores => {
-          const [songs, songLyrics, cards, learningUnits] = await Promise.all([
+          const [songs, songContents, learningStates] = await Promise.all([
             requestToPromise(stores.songs.getAll(), '导出歌曲失败'),
-            requestToPromise(stores.songLyrics.getAll(), '导出歌词失败'),
-            requestToPromise(stores.cards.getAll(), '导出歌词卡失败'),
-            requestToPromise(stores.learningUnits.getAll(), '导出学习单元失败'),
+            requestToPromise(stores.songContents.getAll(), '导出歌曲内容失败'),
+            requestToPromise(stores.learningStates.getAll(), '导出学习状态失败'),
           ]);
-          return { songs, songLyrics, cards, learningUnits };
+          return { songs, songContents, learningStates };
         },
       );
     },
