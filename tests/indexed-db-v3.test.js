@@ -70,6 +70,57 @@ test('IndexedDB v3: 旧歌曲按歌曲原子迁移并可完整读取', async () 
   await resetDatabase();
 });
 
+test('IndexedDB v3: 大型旧曲库按批迁移并报告持久化批次进度', async () => {
+  await resetDatabase();
+  const legacy = await openLegacyDatabase();
+  const transaction = legacy.transaction(['songs', 'progress'], 'readwrite');
+  const songs = transaction.objectStore('songs');
+  const progress = transaction.objectStore('progress');
+  for (let index = 0; index < 101; index += 1) {
+    const songId = `legacy-batch-${String(index).padStart(3, '0')}`;
+    const cardId = `${songId}-card`;
+    songs.put({
+      id: songId,
+      title: `Legacy Batch ${index}`,
+      rawLrc: `[00:01.00]歌詞 ${index}`,
+      cards: [createCard(cardId, `歌詞 ${index}`, `歌词 ${index}`)],
+      createdAt: index + 1,
+      updatedAt: index + 1,
+    });
+    progress.put({
+      songId,
+      currentCardId: cardId,
+      studiedCardIds: [],
+      masteredCardIds: [],
+      cardStates: {},
+      lastStudiedAt: 0,
+    });
+  }
+  await transactionDone(transaction);
+  legacy.close();
+
+  const context = await initializeDatabase();
+  const progressEvents = [];
+  const result = await migrateDatabaseV3(context, {
+    onProgress(event) {
+      progressEvents.push(event.completed);
+    },
+  });
+  const overview = await createDataRepository(context).getOverview();
+  const migrationState = await runTransaction(context, 'meta', 'readonly', store =>
+    requestToPromise(store.get('migration:v3')));
+
+  assert.deepEqual(result, { total: 101, completed: 101 });
+  assert.deepEqual(progressEvents, [0, 50, 100, 101]);
+  assert.equal(overview.songs, 101);
+  assert.equal(overview.cards, 101);
+  assert.equal(overview.learningUnits, 101);
+  assert.equal(migrationState.status, 'complete');
+  assert.equal(migrationState.completed, 101);
+  context.database.close();
+  await resetDatabase();
+});
+
 test('IndexedDB v3: 保存、复习索引更新和删除保持一致', async () => {
   await resetDatabase();
   const context = await initializeDatabase();
