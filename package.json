@@ -44,7 +44,7 @@
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "fake-indexeddb": "^6.2.5",
-    "vite": "^6.3.5",
+    "vite": "^6.4.5",
     "yaml": "^2.9.0"
   },
   "engines": {
